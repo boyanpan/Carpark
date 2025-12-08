@@ -143,7 +143,7 @@
     let lastCheapest = null;
 
     // =========================================================
-    // ⭐ 車位資訊：處理「未知」邏輯（照你規則設計）
+    // ⭐ 車位資訊：處理未知 / 總數 / 剩餘的邏輯
     // =========================================================
     function buildSpaceInfo(p) {
       const rows = [];
@@ -166,7 +166,7 @@
         rows.push({ label, a, t, validA, validT, type });
       }
 
-      // 欄位名稱要跟後端 Carpark.py 對得上
+      // 欄位名稱要跟後端 Carpark.py 一致
       pushRow("汽車車位",   p.availablecar,    p.totalcar);
       pushRow("機車車位",   p.availablemotor,  p.totalmotor);
       pushRow("電動車車位", p.availableev,     p.totalev);
@@ -185,10 +185,8 @@
           return;
         }
 
-        // 規則 1：
-        // 如果有其他類別有剩餘（both / onlyA），
-        // 而這一個只有總數（onlyT），就隱藏
-        // → 對應：汽車 8/18、機車 未知/42 → 機車隱藏
+        // 有其他類別有剩餘，而這一個只有總數 → 隱藏
+        // 對應：汽車 8/18、機車 未知/42 → 機車隱藏
         if (r.type === "onlyT" && hasAnyWithAvailable) {
           return;
         }
@@ -201,8 +199,9 @@
           // 例：122 / 0 → 顯示「剩餘 122」
           text = `剩餘 ${r.a}`;
         } else if (r.type === "onlyT") {
-          // 例：未知 / 369、未知 / 188 → 顯示「369」、「188」
-          text = `${r.t}`;
+          // 例：未知 / 369、未知 / 188，而且整體都只有總數
+          // → 顯示總數 + 備註
+          text = `${r.t}（總車位數，無即時剩餘）`;
         }
 
         html += `${r.label}：${text}<br>`;
