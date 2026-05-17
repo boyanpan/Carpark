@@ -1,508 +1,60 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<html lang="zh-TW">
 <head>
-  <meta charset="UTF-8" />
-  <title>智慧停車推薦系統</title>
-
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css"/>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css"/>
-
-  <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      font-family: "Microsoft JhengHei", sans-serif;
-    }
-    #topBar {
-      height: 45px;
-      padding: 5px 10px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      background: #f0f0f0;
-    }
-    #searchInput {
-      flex: 1;
-      padding: 6px 10px;
-      font-size: 16px;
-    }
-    #map {
-      width: 100%;
-      height: 50vh;
-    }
-    #recommendation {
-      background: #fff7e6;
-      border-top: 1px solid #ffdca8;
-      border-bottom: 1px solid #ffdca8;
-      padding: 8px 12px;
-      font-size: 14px;
-    }
-    #recommendation .title {
-      font-weight: bold;
-      margin-bottom: 4px;
-    }
-    #recommendation .item {
-      padding: 6px 8px;
-      border-radius: 4px;
-      margin-bottom: 6px;
-      cursor: pointer;
-    }
-    #recommendation .item:hover {
-      background: #ffe9c2;
-    }
-    #altBoxToggle {
-      margin-top: 4px;
-      font-size: 13px;
-      color: #b24700;
-      cursor: pointer;
-      text-decoration: underline;
-    }
-    #alternatives {
-      display: none;
-      padding: 8px 12px;
-      font-size: 13px;
-      background: #fffdf7;
-      border-bottom: 1px solid #ffdca8;
-    }
-    #resultList {
-      height: calc(50vh - 50px);
-      overflow: auto;
-      padding: 10px;
-      background: #fafafa;
-      font-size: 14px;
-    }
-
-    .search-marker {
-      width: 30px;
-      height: 30px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .search-marker-outer {
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      border: 3px solid #ff3b82;
-      background: rgba(255, 59, 130, 0.15);
-      box-shadow: 0 0 10px rgba(255, 59, 130, 0.6);
-      animation: searchPulse 1.4s infinite;
-      position: relative;
-    }
-    .search-marker-inner {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #ff3b82;
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-    }
-    @keyframes searchPulse {
-      0% { transform: scale(0.9); opacity: 0.8; }
-      50% { transform: scale(1.15); opacity: 1; }
-      100% { transform: scale(0.9); opacity: 0.6; }
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>P-Finder | 智能停車推薦系統</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+    
+    <link rel="stylesheet" href="style.css">
 </head>
-
-<body>
-  <div id="topBar">
-    <input
-      id="searchInput"
-      placeholder="輸入目的地（例如：台北101、台北車站），按 Enter 搜尋"
-    />
-  </div>
-
-  <div id="map"></div>
-
-  <div id="recommendation"><i>尚未搜尋，無推薦</i></div>
-  <div id="alternatives"></div>
-
-  <div id="resultList"><i>請先輸入地點以搜尋附近停車場</i></div>
-
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
-
-  <script>
-    "use strict";
-
-    const API_BASE_URL = "http://127.0.0.1:5000";
-
-    let map, markerCluster, userMarker = null;
-    const searchInputEl = document.getElementById("searchInput");
-    const recoEl = document.getElementById("recommendation");
-    const altEl = document.getElementById("alternatives");
-    const resultListEl = document.getElementById("resultList");
-
-    let lastDest = null;
-    let lastNearest = null;
-    let lastCheapest = null;
-
-    // =========================================================
-    // ⭐ 車位資訊：處理未知 / 總數 / 剩餘的邏輯
-    // =========================================================
-    function buildSpaceInfo(p) {
-      const rows = [];
-
-      function pushRow(label, a, t) {
-        const validA = (a != null && a >= 0);   // 有效剩餘
-        const validT = (t != null && t > 0);    // 總數要 >0 才算有意義，0 當沒填
-
-        let type;
-        if (!validA && !validT) {
-          type = "none";     // 完全沒資料
-        } else if (validA && validT) {
-          type = "both";     // 例：31 / 33
-        } else if (validA && !validT) {
-          type = "onlyA";    // 例：122 / 0（有剩餘，總數無效）
-        } else {
-          type = "onlyT";    // 例：未知 / 369（只有總數）
-        }
-
-        rows.push({ label, a, t, validA, validT, type });
-      }
-
-      // 欄位名稱要跟後端 Carpark.py 一致
-      pushRow("汽車車位",   p.availablecar,    p.totalcar);
-      pushRow("機車車位",   p.availablemotor,  p.totalmotor);
-      pushRow("電動車車位", p.availableev,     p.totalev);
-      pushRow("身障車位",   p.availableright,  p.totalright);
-      pushRow("婦幼車位",   p.availablewomen,  p.totalwomen);
-
-      // 是否有「有剩餘」的類別（both 或 onlyA）
-      const hasAnyWithAvailable =
-        rows.some(r => r.type === "both" || r.type === "onlyA");
-
-      let html = "";
-
-      rows.forEach(r => {
-        if (r.type === "none") {
-          // 完全沒資料 → 不顯示
-          return;
-        }
-
-        // 有其他類別有剩餘，而這一個只有總數 → 隱藏
-        // 對應：汽車 8/18、機車 未知/42 → 機車隱藏
-        if (r.type === "onlyT" && hasAnyWithAvailable) {
-          return;
-        }
-
-        let text = "";
-        if (r.type === "both") {
-          // 例：31 / 33
-          text = `${r.a} / ${r.t}`;
-        } else if (r.type === "onlyA") {
-          // 例：122 / 0 → 顯示「剩餘 122」
-          text = `剩餘 ${r.a}`;
-        } else if (r.type === "onlyT") {
-          // 例：未知 / 369、未知 / 188，而且整體都只有總數
-          // → 顯示總數 + 備註
-          text = `${r.t}（總車位數，無即時剩餘）`;
-        }
-
-        html += `${r.label}：${text}<br>`;
-      });
-
-      return html;
-    }
-
-    // =========================================================
-    // 地圖設定
-    // =========================================================
-    const searchIcon = L.divIcon({
-      className: "search-marker",
-      html: '<div class="search-marker-outer"><div class="search-marker-inner"></div></div>',
-      iconSize: [30, 30],
-      iconAnchor: [15, 15]
-    });
-
-    const parkingIcon = L.icon({
-      iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-      shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-      iconSize: [25, 41],
-      iconAnchor: [12, 41],
-      popupAnchor: [1, -34],
-      shadowSize: [41, 41]
-    });
-
-    function initMap() {
-      map = L.map("map").setView([25.033, 121.565], 13);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19
-      }).addTo(map);
-      markerCluster = L.markerClusterGroup({ chunkedLoading: true });
-      map.addLayer(markerCluster);
-    }
-
-    function formatDistance(m) {
-      if (m == null) return "未知";
-      return m < 1000 ? `${m.toFixed(0)} 公尺` : `${(m / 1000).toFixed(2)} 公里`;
-    }
-
-    // =========================================================
-    // Popup（顯示五大車位）
-    // =========================================================
-    function buildPopup(p) {
-      const typeLabel = p.structureType ? `（${p.structureType}）` : "";
-      const priceLabel = p.pricePerHour != null ? `約 ${p.pricePerHour} 元 / 小時（估算）` : "無法估算";
-
-      return `
-        <b>${p.name}</b>${typeLabel}<br>
-        地址：${p.address}<br>
-        收費：${p.payex || "無資料"}<br>
-        ${buildSpaceInfo(p)}
-        距離：${formatDistance(p.distance_m)}<br>
-        步行：約 ${p.walkTimeMin} 分<br>
-        ${priceLabel}
-      `;
-    }
-
-    // =========================================================
-    // 搜尋 & API 呼叫
-    // =========================================================
-    async function geocode(keyword) {
-      const url =
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(keyword)}&countrycodes=tw&limit=1`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (!data.length) return null;
-      return {
-        lat: parseFloat(data[0].lat),
-        lng: parseFloat(data[0].lon),
-        display: data[0].display_name
-      };
-    }
-
-    async function fetchNearby(lat, lng) {
-      const res = await fetch(`${API_BASE_URL}/nearby?lat=${lat}&lng=${lng}&radius=1000`);
-      return res.json();
-    }
-
-    async function fetchAlternatives(park, dest) {
-      const params = new URLSearchParams({
-        parkLat: park.lat,
-        parkLng: park.lng,
-        destLat: dest.lat,
-        destLng: dest.lng
-      });
-      const res = await fetch(`${API_BASE_URL}/alternatives?${params.toString()}`);
-      return res.json();
-    }
-
-    async function runSearch() {
-      const keyword = searchInputEl.value.trim();
-      if (!keyword) {
-        resultListEl.innerHTML = "<i>請先輸入地點</i>";
-        return;
-      }
-
-      try {
-        const geo = await geocode(keyword);
-        if (!geo) {
-          resultListEl.innerHTML = "<i>找不到此地點</i>";
-          return;
-        }
-
-        lastDest = { lat: geo.lat, lng: geo.lng };
-
-        if (userMarker) map.removeLayer(userMarker);
-        userMarker = L.marker([geo.lat, geo.lng], { icon: searchIcon })
-          .addTo(map)
-          .bindPopup(`<b>搜尋位置</b><br>${geo.display}`)
-          .openPopup();
-
-        const nearbyData = await fetchNearby(geo.lat, geo.lng);
-
-        const list = nearbyData.nearby || [];
-        lastNearest = nearbyData.nearest || null;
-        lastCheapest = nearbyData.cheapest || null;
-
-        markerCluster.clearLayers();
-
-        list.forEach(p => {
-          if (!p.lat || !p.lng) return;
-          const marker = L.marker([p.lat, p.lng], { icon: parkingIcon })
-            .bindPopup(buildPopup(p));
-          p._marker = marker;
-          markerCluster.addLayer(marker);
-        });
-
-        renderRecommendation(lastNearest, lastCheapest);
-        renderList(list);
-
-        if (list.length > 0) {
-          const bounds = list.map(p => [p.lat, p.lng]);
-          bounds.push([geo.lat, geo.lng]);
-          map.fitBounds(bounds);
-        } else {
-          map.setView([geo.lat, geo.lng], 16);
-        }
-
-      } catch (err) {
-        console.error(err);
-        resultListEl.innerHTML = "<i>搜尋失敗，請稍後再試</i>";
-      }
-    }
-
-    // =========================================================
-    // 推薦區（最近 / 最便宜）
-    // =========================================================
-    function renderRecommendation(nearest, cheapest) {
-      altEl.style.display = "none";
-      altEl.innerHTML = "";
-
-      if (!nearest && !cheapest) {
-        recoEl.innerHTML = "<i>附近沒有找到停車場</i>";
-        return;
-      }
-
-      recoEl.innerHTML = '<div class="title">推薦停車場（依目的地為中心）</div>';
-
-      const warnNeedAlt = (p) => {
-        const left = Number(p?.availablecar ?? -9);
-        return isNaN(left) || left <= 0;
-      };
-
-      function buildRecItem(title, p) {
-        const typeLabel = p.structureType ? `（${p.structureType}）` : "";
-        const spaceHtml = buildSpaceInfo(p);
-
-        const div = document.createElement("div");
-        div.className = "item";
-        div.innerHTML = `
-          <b>${title}</b><br>
-          ${p.name}${typeLabel}<br>
-          距離：${formatDistance(p.distance_m)}；步行 ${p.walkTimeMin} 分<br>
-          ${spaceHtml}
-        `;
-        div.onclick = () => {
-          map.setView([p.lat, p.lng], 18);
-          if (p._marker) p._marker.openPopup();
-        };
-        recoEl.appendChild(div);
-        return div;
-      }
-
-      if (nearest) {
-        buildRecItem("最近的停車場", nearest);
-        if (warnNeedAlt(nearest)) {
-          const warn = document.createElement("div");
-          warn.id = "altBoxToggle";
-          warn.textContent = "⚠ 車位可能不足，查看替代方案";
-          warn.onclick = () => toggleAlternatives("nearest");
-          recoEl.appendChild(warn);
-        }
-      }
-
-      if (cheapest) {
-        buildRecItem("預估最便宜的停車場", cheapest);
-      }
-    }
-
-    // =========================================================
-    // 列表
-    // =========================================================
-    function renderList(list) {
-      if (!list.length) {
-        resultListEl.innerHTML = "<i>附近沒有停車場</i>";
-        return;
-      }
-
-      resultListEl.innerHTML = "";
-      list.forEach((p, i) => {
-        const div = document.createElement("div");
-        div.style.padding = "6px 0";
-        div.style.borderBottom = "1px solid #ddd";
-        div.style.cursor = "pointer";
-
-        const typeLabel = p.structureType ? `（${p.structureType}）` : "";
-
-        div.innerHTML = `
-          ${i + 1}. <b>${p.name}</b>${typeLabel}<br>
-          距離：${formatDistance(p.distance_m)}；步行 ${p.walkTimeMin} 分
-        `;
-        div.onclick = () => {
-          map.setView([p.lat, p.lng], 18);
-          if (p._marker) p._marker.openPopup();
-        };
-        resultListEl.appendChild(div);
-      });
-    }
-
-    // =========================================================
-    // 替代方案（捷運 / YouBike / 步行）
-    // =========================================================
-    async function toggleAlternatives(mode) {
-      if (!lastDest) return;
-      const target = mode === "nearest" ? lastNearest : lastCheapest;
-
-      if (!target) {
-        altEl.style.display = "none";
-        return;
-      }
-
-      try {
-        const alt = await fetchAlternatives(
-          { lat: target.lat, lng: target.lng },
-          lastDest
-        );
-        renderAlternatives(alt, target);
-      } catch (err) {
-        console.error(err);
-        altEl.style.display = "block";
-        altEl.innerHTML = "<i>替代方案取得失敗</i>";
-      }
-    }
-
-    function renderAlternatives(alt, park) {
-      altEl.style.display = "block";
-
-      let html = `<b>替代交通方案（從 ${park.name} → 目的地）</b><br><br>`;
-
-      // 捷運
-      if (alt.metro) {
-        if (alt.metro.note) {
-          html += `🚇 捷運：${alt.metro.note}<br>`;
-        } else {
-          html += `🚇 捷運：從「${alt.metro.from.name}」搭到「${alt.metro.to.name}」共 ${alt.metro.stops} 站，約 ${alt.metro.ride_time_min} 分<br>`;
-          html += `　➡ 步行到起點站：約 ${Math.round(alt.metro.from.distance_m / 80)} 分<br>`;
-          html += `　➡ 下車後步行到目的地：約 ${Math.round(alt.metro.to.distance_m / 80)} 分<br>`;
-        }
-      } else {
-        html += `🚇 捷運：無建議（附近無捷運站）<br>`;
-      }
-
-      // YouBike
-      if (alt.youbike) {
-        html += `<br>🚴 YouBike：<br>`;
-        html += `　借車站：「${alt.youbike.rent.name}」 步行 ${Math.round(alt.youbike.rent.distance_m / 80)} 分<br>`;
-        html += `　還車站：「${alt.youbike.return.name}」 步行 ${Math.round(alt.youbike.return.distance_m / 80)} 分<br>`;
-        html += `　騎乘：約 ${alt.youbike.ride_time_min} 分，距離 ${formatDistance(alt.youbike.ride_distance_m)}<br>`;
-      } else {
-        html += `<br>🚴 YouBike：附近無可借 / 可還站<br>`;
-      }
-
-      // 步行
-      html += `<br>🚶 步行：距離 ${formatDistance(alt.walk.distance_m)}，約 ${alt.walk.time_min} 分<br>`;
-
-      // 公車（placeholder）
-      html += `<br>🚌 公車：本版本尚未提供公車建議<br>`;
-
-      altEl.innerHTML = html;
-    }
-
-    // =========================================================
-    // 事件綁定 & init
-    // =========================================================
-    searchInputEl.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter") runSearch();
-    });
-
-    initMap();
-  </script>
+<body class="bg-slate-100">
+
+    <div id="nav-header" class="fixed top-0 left-0 right-0 z-[3000] bg-blue-700 text-white p-5 shadow-2xl flex-col gap-2">
+        <div class="flex items-center gap-4">
+            <div class="w-12 h-12 flex items-center justify-center bg-white/20 rounded-xl border border-white/30">
+                <span id="nav-arrow" class="text-3xl font-bold">↑</span>
+            </div>
+            <div class="flex-1">
+                <p id="nav-instruction" class="text-lg font-bold leading-tight">計算路徑中...</p>
+                <p id="nav-metrics" class="text-xs opacity-80 font-mono tracking-widest">0.0 km | 0 min</p>
+            </div>
+            <button onclick="stopNavigation()" class="bg-red-500 px-4 py-2 rounded-lg font-bold shadow-lg transition active:scale-95">結束</button>
+        </div>
+    </div>
+
+    <div class="sidebar flex flex-col z-[1001]">
+        <div class="p-5 border-b bg-white sticky top-0 z-20">
+            <div class="flex justify-between items-center mb-4">
+                <h1 class="text-2xl font-black text-blue-600 italic tracking-tighter">P-Finder</h1>
+                <div id="gps-status" class="flex items-center gap-2 text-[10px] font-bold text-slate-400">
+                    GPS <div id="gps-dot" class="w-2 h-2 bg-red-500 rounded-full"></div>
+                </div>
+            </div>
+            <div class="flex gap-2">
+                <input type="text" id="searchInput" oninput="handleFilter()" placeholder="輸入關鍵字或搜尋附近..." 
+                       class="flex-1 p-3 bg-slate-100 rounded-xl border-none text-sm outline-none focus:ring-2 focus:ring-blue-400">
+                <button onclick="locateUser()" class="bg-white border px-3 rounded-xl shadow-sm active:bg-slate-50">📍</button>
+            </div>
+        </div>
+
+        <div class="flex border-b text-center text-xs font-bold text-slate-400 bg-white">
+            <button onclick="switchTab('search')" id="tab-search" class="flex-1 py-4 active-tab">推薦停車</button>
+            <button onclick="switchTab('fav')" id="tab-fav" class="flex-1 py-4">我的收藏</button>
+        </div>
+
+        <div id="content-list" class="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50 no-scrollbar">
+            </div>
+    </div>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+    
+    <script src="script.js"></script>
 </body>
 </html>

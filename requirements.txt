@@ -1,0 +1,8 @@
+Flask
+flask-cors
+mysql-connector-python
+pandas
+requests
+pyproj
+APScheduler
+gunicorn
