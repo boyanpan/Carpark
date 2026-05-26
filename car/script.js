@@ -330,11 +330,16 @@ async function searchLocation() {
             searchedLocation = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
             if (destMarker) map.removeLayer(destMarker);
             
-            // 在該小吃店/飯店上方釘上紅色大頭針 📍
-            destMarker = L.marker(searchedLocation, {
-                icon: L.divIcon({ html: `<div class="target-marker-container"><div class="target-marker">📍</div></div>`, className: 'custom-div-icon', iconAnchor: [20, 40] }),
-                zIndexOffset: 2000
-            }).addTo(map);
+            // 在該小吃店/飯店上方釘上紅色大頭針 📍 並在上方顯示常駐名稱
+        destMarker = L.marker(searchedLocation, {
+    icon: L.divIcon({ html: `<div class="target-marker-container"><div class="target-marker">📍</div></div>`, className: 'custom-div-icon', iconAnchor: [20, 40] }),
+    zIndexOffset: 2000
+    }).addTo(map).bindTooltip(query, {
+    permanent: true,       // 👈 設定為 true，讓文字名稱一直顯示，不用點擊
+    direction: 'top',      // 👈 顯示在 📍 圖標的正上方
+    className: 'custom-map-label', // 👈 套用你 style.css 裡寫好的漂亮綠色膠囊標籤樣式
+    offset: L.point(0, -35) // 👈 微調文字位置，使其完美浮在 📍 正上方不壓到圖標
+    });
 
             // ⚡ 核心交接：handleFilter 會自動切換 refLocation 為這個商家座標
             // 並重新把全台北市的車位「由近到遠」洗牌排序！

@@ -98,3 +98,17 @@ html, body { height: 100vh; width: 100vw; margin: 0; padding: 0; }
     background: none !important; 
     border: none !important; 
 }
+
+/* 🔧 修正搜尋標籤的小箭頭位置與顏色 */
+.leaflet-tooltip-top.custom-map-label::before {
+    border-top-color: #10b981 !important; /* 讓小箭頭的顏色變成跟邊框一樣的綠色 */
+    bottom: -10px !important;              /* 修正微調箭頭的垂直位置，使其緊貼標籤底部 */
+    left: 50% !important;                  /* 確保箭頭水平置中 */
+    transform: translateX(-50%) !important;
+}
+
+/* 移除 Leaflet 預設的白色背景與黑邊框干擾 */
+.leaflet-tooltip.custom-map-label {
+    background-color: #ffffff !important;
+    border: 2px solid #10b981 !important;
+}
