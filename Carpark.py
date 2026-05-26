@@ -155,18 +155,29 @@ def load_metro_data():
     except: pass
 
 # =========================================================
-# 🌐 網頁路由區塊
+# 🌐 網頁路由與 API 供應區塊
 # =========================================================
 @app.route("/")
 def serve_index():
     return app.send_static_file('index.html')
 
-# =========================================================
-# 🚀 API 端點 (保留功能)
-# =========================================================
 @app.route("/nearby")
 def nearby():
-    return jsonify({"message": "後端服務正常，目前前端處於直連政府開放資料之測試模式"})
+    return jsonify({"message": "後端真實連線中", "status": "active"})
+
+# 🌟【重要新增】前端專用即時車位 API 路由 (直接吐出雲端資料庫資料)
+@app.route("/api/parking")
+def get_parking_data():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM parking_lots")
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return jsonify({"status": "success", "data": rows})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
     init_db()          
