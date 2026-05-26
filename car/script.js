@@ -1,9 +1,8 @@
 proj4.defs("EPSG:3826", "+proj=tmerc +lat_0=0 +lon_0=121 +k=0.9999 +x_0=250000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs");
 
-// 初始化地圖
+// 初始化地圖 (預設定位在台北 101，若 GPS 成功會自動飛過去)
 const map = L.map('map', { zoomControl: false, tap: false }).setView([25.0339, 121.5644], 14);
 L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png').addTo(map);
-
 const markerCluster = L.markerClusterGroup({ chunkedLoading: true, disableClusteringAtZoom: 16, maxClusterRadius: 60 });
 map.addLayer(markerCluster);
 
@@ -12,15 +11,17 @@ let userMarker = null, searchedLocation = null, destMarker = null, radiusCircle 
 let routingControl = null, isNavigating = false, currentDestination = null, currentTab = 'search';
 let favorites = JSON.parse(localStorage.getItem('p_favs')) || [];
 
-// UI 元件 (加上防錯機制)
+// 取得 UI 元件 (加上防錯機制)
 const bottomSheet = document.getElementById('bottom-sheet');
 const searchPanel = document.getElementById('search-panel');
 const dragHandle = document.getElementById('drag-handle');
 const sheetArrow = document.getElementById('sheet-arrow');
-let startY = 0, currentHeight = 0, isSheetExpanded = false; 
+let startY = 0, currentHeight = 0, isSheetExpanded = false;
 
+// 手機板初始化高度
 if (window.innerWidth < 768 && bottomSheet) bottomSheet.style.height = '35vh';
 
+// 點擊箭頭展開或收合
 window.toggleBottomSheet = function() {
     if (window.innerWidth >= 768 || !bottomSheet) return;
     isSheetExpanded = !isSheetExpanded;
@@ -29,7 +30,7 @@ window.toggleBottomSheet = function() {
         if (sheetArrow) sheetArrow.style.transform = 'rotate(180deg)';
     } else {
         bottomSheet.style.height = '35vh';
-        if (sheetArrow) sheetArrow.style.transform = 'rotate(0deg)';   
+        if (sheetArrow) sheetArrow.style.transform = 'rotate(0deg)';
     }
 };
 
@@ -38,23 +39,26 @@ function collapseBottomSheet() {
         bottomSheet.style.transition = 'height 0.4s cubic-bezier(0.25, 1, 0.5, 1)';
         bottomSheet.style.height = '35vh';
         isSheetExpanded = false;
-        if(sheetArrow) sheetArrow.style.transform = 'rotate(0deg)';
+        if (sheetArrow) sheetArrow.style.transform = 'rotate(0deg)';
     }
 }
 
+// 拖拽面板功能
 if (dragHandle && bottomSheet) {
     dragHandle.addEventListener('touchstart', (e) => {
         startY = e.touches[0].clientY;
         currentHeight = bottomSheet.getBoundingClientRect().height;
         bottomSheet.style.transition = 'none';
     }, {passive: true});
+
     dragHandle.addEventListener('touchmove', (e) => {
         let newHeight = currentHeight + (startY - e.touches[0].clientY);
         const winH = window.innerHeight;
-        if (newHeight > winH * 0.85) newHeight = winH * 0.85; 
-        if (newHeight < winH * 0.20) newHeight = winH * 0.20; 
+        if (newHeight > winH * 0.85) newHeight = winH * 0.85;
+        if (newHeight < winH * 0.20) newHeight = winH * 0.20;
         bottomSheet.style.height = `${newHeight}px`;
     }, {passive: true});
+
     dragHandle.addEventListener('touchend', () => {
         bottomSheet.style.transition = 'height 0.3s cubic-bezier(0.25, 1, 0.5, 1)';
         const finalHeight = bottomSheet.getBoundingClientRect().height;
@@ -69,6 +73,7 @@ if (dragHandle && bottomSheet) {
     });
 }
 
+// 拖動地圖時隱藏面板
 map.on('dragstart', () => {
     if (window.innerWidth < 768 && !isNavigating) {
         if (searchPanel) searchPanel.style.transform = 'translateY(-100%)';
@@ -81,6 +86,21 @@ map.on('dragend', () => {
         if (searchPanel) searchPanel.style.transform = 'translateY(0)';
         if (bottomSheet) bottomSheet.style.transform = 'translateY(0)';
     }
+});
+
+// 地圖點擊定位功能
+map.on('click', function(e) {
+    if (isNavigating) return;
+    const clickedLat = e.latlng.lat;
+    const clickedLng = e.latlng.lng;
+    
+    searchedLocation = [clickedLat, clickedLng];
+    window.currentKeyword = null;
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) searchInput.value = "地圖選定位置";
+
+    createSearchMarker("指定位置", clickedLat, clickedLng, `經緯度: ${clickedLat.toFixed(4)}, ${clickedLng.toFixed(4)}`);
+    handleFilter();
 });
 
 function updateCarIcon() {
@@ -100,7 +120,7 @@ function handleOrientation(event) {
     if (heading !== null) {
         hasCompass = true;
         currentHeading = heading;
-        updateCarIcon(); 
+        updateCarIcon();
     }
 }
 
@@ -119,7 +139,6 @@ function initCompass() {
     }
 }
 
-// 計算文字錯字距離演算法 (Levenshtein Distance)
 function getLevenshteinDistance(a, b) {
     const matrix = [];
     for (let i = 0; i <= b.length; i++) matrix[i] = [i];
@@ -136,7 +155,6 @@ function getLevenshteinDistance(a, b) {
     return matrix[b.length][a.length];
 }
 
-// 智慧匹配
 function smartMatch(targetStr, queryStr) {
     if (!targetStr || !queryStr) return false;
     const normalize = str => str.replace(/台/g, '臺').trim().toLowerCase();
@@ -153,7 +171,6 @@ function smartMatch(targetStr, queryStr) {
     return false;
 }
 
-// 獲取臺北市停車場資料
 async function fetchTaipeiParkingData() {
     try {
         console.log("正在下載台北市停車場資料...");
@@ -294,78 +311,113 @@ function initGPS() {
     );
 }
 
-// 按下搜尋後，自動校正錯字並尋找最接近目標
+// 🚀 ✨【強效地址定位演算法 - 修正參數對位 Bug】
 async function searchLocation() {
     const queryInput = document.getElementById('searchInput');
-    const query = queryInput ? queryInput.value.trim() : "";
-    if (!query) return clearSearchAndLocate();
+    let rawQuery = queryInput ? queryInput.value.trim() : "";
+    if (!rawQuery) return clearSearchAndLocate();
     
     collapseBottomSheet();
     const listEl = document.getElementById('content-list');
+    if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">🌍 正在為您精確定位地址...</div>`;
 
-    // 1. 精準匹配判定
-    const isLifeKeyword = /(小吃|超商|飯店|酒店|便利商店|餐廳|咖啡|美食|7-11|全家|萊爾富|OK|夜市)/i.test(query);
+    let cleanQuery = rawQuery.replace(/台/g, '臺').replace(/\s+/g, ' ').trim();
+
+    // 精準門牌切除，只留路名結構
+    cleanQuery = cleanQuery
+        .replace(/\d+\s*[號之-]\s*\d+\s*([樓室Ff區])?/g, '')
+        .replace(/\d+\s*[號樓室Ff]/g, '')
+        .trim();
+
+    if (!cleanQuery) cleanQuery = rawQuery;
+
+    // 防線 A：內部資料庫直接比對
+    const isLifeKeyword = /(小吃|超商|飯店|酒店|便利商店|餐廳|咖啡|美食|7-11|全家|萊爾富|OK|夜市)/i.test(cleanQuery);
     let localMatches = [];
     if (!isLifeKeyword) {
         localMatches = parkingData.filter(p => 
-            smartMatch(p.name, query) || smartMatch(p.destName, query) || smartMatch(p.address, query)
+            smartMatch(p.name, cleanQuery) || smartMatch(p.destName, cleanQuery) || smartMatch(p.address, cleanQuery)
         );
     }
 
     if (localMatches.length > 0) {
-        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-blue-500 font-bold">🔍 找到 ${localMatches.length} 筆相關地點...</div>`;
-        window.currentKeyword = query;
+        window.currentKeyword = cleanQuery;
         searchedLocation = null; 
         handleFilter(); 
-        
         const bounds = L.latLngBounds(localMatches.map(p => [p.lat, p.lng]));
-        map.fitBounds(bounds, { padding: [50, 50], animate: true, maxZoom: 15 });
+        map.fitBounds(bounds, { padding: [50, 50], animate: true, maxZoom: 16 });
         return;
     }
 
-    // 2. 錯字自動校正 (最接近尋找)
-    let bestMatch = null;
-    let minDistance = Infinity;
+    // 防線 B：OpenStreetMap Nominatim
+    const callNominatimAPI = async (searchText) => {
+        try {
+            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchText)}&countrycodes=tw&viewbox=121.0,24.8,122.0,25.3&bounded=1&limit=1`;
+            const res = await fetch(url, { headers: { 'Accept-Language': 'zh-TW,zh;q=0.9' } });
+            const data = await res.json();
+            return data.length > 0 ? data[0] : null;
+        } catch (e) { return null; }
+    };
 
-    parkingData.forEach(p => {
-        const targetChunk = p.destName.substring(0, query.length);
-        const dist = getLevenshteinDistance(targetChunk, query);
-        if (dist < minDistance) {
-            minDistance = dist;
-            bestMatch = p;
-        }
-    });
+    let apiResult = null;
+    apiResult = await callNominatimAPI(cleanQuery);
 
-    if (bestMatch && minDistance <= 2) {
-        if (queryInput) queryInput.value = bestMatch.destName;
-        searchedLocation = [bestMatch.lat, bestMatch.lng];
-        window.currentKeyword = null;
+    if (!apiResult && !cleanQuery.includes('市') && !cleanQuery.includes('縣')) {
+        apiResult = await callNominatimAPI(`臺北市 ${cleanQuery}`);
+    }
+    if (!apiResult && !cleanQuery.includes('市') && !cleanQuery.includes('縣')) {
+        apiResult = await callNominatimAPI(`新北市 ${cleanQuery}`);
+    }
+    if (!apiResult) {
+        apiResult = await callNominatimAPI(rawQuery);
+    }
 
-        createSearchMarker(bestMatch.destName, bestMatch.lat, bestMatch.lng, bestMatch.address);
+    // 🌟 定位成功（👉 這裡修正呼叫順序：名稱, 緯度, 經度, 詳細地址描述）
+    if (apiResult) {
+        const lat = parseFloat(apiResult.lat);
+        const lon = parseFloat(apiResult.lon);
+        
+        searchedLocation = [lat, lon];
+        window.currentKeyword = null; 
+        createSearchMarker(rawQuery, lat, lon, apiResult.display_name);
         handleFilter();
         return;
     }
 
-    // 3. 呼叫 Nominatim 外部地圖查詢
-    if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">🌍 正在搜尋「${query}」...</div>`;
-    try {
-        let searchQuery = query;
-        if (!searchQuery.includes('台北') && !searchQuery.includes('臺北')) {
-            searchQuery = '臺北市 ' + searchQuery;
-        }
+    // 防線 C：文字距離保底
+    let bestMatch = null;
+    let minDistance = Infinity;
 
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&countrycodes=tw&limit=1`);
-        const data = await res.json();
-        if (data.length > 0) {
-            searchedLocation = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
-            createSearchMarker(query, searchedLocation[0], searchedLocation[1], data[0].display_name);
-            handleFilter();
-            collapseBottomSheet();
-        } else {
-            if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">找不到「${query}」<br><span class="text-xs text-slate-400">請確認名字是否輸入正確</span></div>`;
+    parkingData.forEach(p => {
+        const compareLen = Math.min(cleanQuery.length, 4);
+        const nameChunk = p.destName.substring(0, compareLen);
+        const addressChunk = p.address.replace(/臺北市|台北市/g, '').substring(0, compareLen);
+        
+        const distName = getLevenshteinDistance(nameChunk, cleanQuery.substring(0, compareLen));
+        const distAddr = getLevenshteinDistance(addressChunk, cleanQuery.substring(0, compareLen));
+        
+        if (distName < minDistance) { minDistance = distName; bestMatch = p; }
+        if (distAddr < minDistance) { minDistance = distAddr; bestMatch = p; }
+    });
+
+    if (bestMatch && minDistance <= 3) {
+        searchedLocation = [bestMatch.lat, bestMatch.lng];
+        window.currentKeyword = null;
+        createSearchMarker(rawQuery, bestMatch.lat, bestMatch.lng, bestMatch.address);
+        handleFilter();
+    } else {
+        const fallbackLoc = userLocation || [25.0339, 121.5644];
+        searchedLocation = fallbackLoc;
+        window.currentKeyword = null;
+        createSearchMarker("未知的地址", fallbackLoc[0], fallbackLoc[1], "找不到特定地址，已先定位在附近或市中心");
+        handleFilter();
+        
+        if (listEl) {
+            listEl.innerHTML = `<div class="text-center py-20 text-amber-600 font-bold">
+                ⚠️ 地圖查不到「${rawQuery}」<br>
+                <span class="text-xs text-slate-400 font-medium">已先自動定位在附近，您可以直接點擊地圖挑選位置！</span>
+            </div>`;
         }
-    } catch (err) { 
-        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500">搜尋失敗</div>`;
     }
 }
 
@@ -383,12 +435,12 @@ function clearSearchAndLocate() {
 
 function handleFilter() {
     if (parkingData.length === 0) return;
-    markerCluster.clearLayers();
     
     let data = (currentTab === 'search') ? [...parkingData] : parkingData.filter(p => favorites.includes(p.id));
-    const radiusSelect = document.getElementById('radiusSelect');
-    const radiusMeters = radiusSelect ? parseFloat(radiusSelect.value) : 99999;
     const refLocation = searchedLocation || userLocation;
+    const isSearching = !!searchedLocation || !!window.currentKeyword;
+    const radiusSelect = document.getElementById('radiusSelect');
+    const radiusMeters = isSearching ? 99999 : (radiusSelect ? parseFloat(radiusSelect.value) : 99999);
 
     if (radiusCircle) map.removeLayer(radiusCircle);
 
@@ -400,7 +452,7 @@ function handleFilter() {
 
     if (refLocation) {
         data = data.map(p => ({ ...p, distance: calculateDistance(refLocation[0], refLocation[1], p.lat, p.lng) }));
-        if (!window.currentKeyword && radiusMeters < 99999) {
+        if (!isSearching && radiusMeters < 99999) {
             data = data.filter(p => p.distance <= (radiusMeters / 1000));
             radiusCircle = L.circle(refLocation, { color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.08, radius: radiusMeters, weight: 1.5 }).addTo(map);
         }
@@ -697,7 +749,7 @@ if (searchInput && autocompleteList) {
     });
 }
 
-// 📍 常駐顯示綠色文字標籤
+// 🌟【終極除 Bug 修正版大頭針常駐標籤與彈窗函數】
 function createSearchMarker(name, lat, lng, address = "") {
     let currentMap = map;
     if (!currentMap) return;
@@ -711,9 +763,19 @@ function createSearchMarker(name, lat, lng, address = "") {
     });
     
     destMarker = L.marker([lat, lng], { icon: customIcon }).addTo(currentMap);
-    destMarker.bindTooltip(name, { permanent: true, direction: 'top', className: 'custom-map-label', offset: L.point(0, -35) });
+    
+    // 👈 精準抓取 name 當作地圖常駐文字標籤
+    destMarker.bindTooltip(name, { 
+        permanent: true, 
+        direction: 'right', 
+        className: 'custom-map-label', 
+        offset: L.point(10, -20) 
+    });
 
-    const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address ? `${name} ${address}` : name)}`;
+    // 👈 修正 Google Maps 跳轉網址格式
+    const searchQuery = address ? `${name} ${address}` : name;
+    const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(searchQuery)}`;
+
     const popupContent = `
         <div style="padding: 10px; font-family: sans-serif; min-width: 180px; text-align: left;">
             <h4 style="margin: 0 0 4px 0; font-size: 14px; color: #1e293b; font-weight: bold;">🔍 ${name}</h4>
