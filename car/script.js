@@ -6,7 +6,6 @@ proj4.defs("EPSG:3826", "+proj=tmerc +lat_0=0 +lon_0=121 +k=0.9999 +x_0=250000 +
 // ==========================================
 // 1. 初始化地圖與全域變數
 // ==========================================
-// 🎯 智慧連線：本地開發連本地，上到 Render 連 Render
 const API_BASE_URL = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') 
     ? "http://127.0.0.1:5000" 
     : window.location.origin;
@@ -17,13 +16,12 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r
 const markerCluster = L.markerClusterGroup({ chunkedLoading: true, disableClusteringAtZoom: 16, maxClusterRadius: 60 });
 map.addLayer(markerCluster);
 
-let parkingData = []; // 存放雲端拿回來的資料
+let parkingData = []; 
 let userLocation = null, previousLocation = null, currentHeading = 0, hasCompass = false;
 let userMarker = null, searchedLocation = null, destMarker = null, radiusCircle = null;
 let routingControl = null, isNavigating = false, currentDestination = null, currentTab = 'search';
 let favorites = JSON.parse(localStorage.getItem('p_favs')) || [];
 
-// UI 元件
 const bottomSheet = document.getElementById('bottom-sheet');
 const searchPanel = document.getElementById('search-panel');
 const dragHandle = document.getElementById('drag-handle');
@@ -33,7 +31,7 @@ let startY = 0, currentHeight = 0, isSheetExpanded = false;
 if (window.innerWidth < 768 && bottomSheet) bottomSheet.style.height = '35vh'; 
 
 // ==========================================
-// 2. 行動端行動抽屜 (Bottom Sheet) 拖曳邏輯
+// 2. 行動端抽屜 (Bottom Sheet) 邏輯
 // ==========================================
 window.toggleBottomSheet = function() {
     if (window.innerWidth >= 768 || !bottomSheet) return;
@@ -100,7 +98,7 @@ map.on('dragend', () => {
 });
 
 // ==========================================
-// 3. 車輛朝向與 GPS 定位控制
+// 3. 車輛朝向與 GPS 控制
 // ==========================================
 function updateCarIcon() {
     if (userMarker) {
@@ -192,9 +190,6 @@ function getBearing(lat1, lon1, lat2, lon2) {
     return (Math.atan2(y, x) * toDeg + 360) % 360;
 }
 
-// ==========================================
-// 💡 文字標準化與智能比對 (結合朋友與原本的邏輯)
-// ==========================================
 function normalizeText(str) {
     if (!str) return "";
     return str.replace(/台/g, '臺').trim().toLowerCase();
@@ -204,32 +199,27 @@ function smartMatch(targetStr, queryStr) {
     if (!targetStr || !queryStr) return false;
     const t = normalizeText(targetStr);
     const q = normalizeText(queryStr);
-    
     if (t.includes(q)) return true;
     if (q.includes('醫院')) {
         const coreKeyword = q.replace('醫院', '').trim(); 
-        if (coreKeyword && t.includes(coreKeyword) && (t.includes('醫院') || t.includes('院區') || t.includes('醫療'))) {
-            return true;
-        }
+        if (coreKeyword && t.includes(coreKeyword) && (t.includes('醫院') || t.includes('院區') || t.includes('醫療'))) return true;
     }
     return false;
 }
 
 // ==========================================
-// 4. 🔥 核心：從 Render/Aiven 撈取資料 (修復被覆蓋的部分)
+// 4. API 資料撈取
 // ==========================================
 async function fetchTaipeiParkingData() {
     try {
         const listEl = document.getElementById('content-list');
-        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">📡 正在從 Aiven 雲端讀取即時車位...</div>`;
+        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">📡 正在從雲端讀取即時車位...</div>`;
         
-        // 🎯 重新串接回你的後端 API！
         const res = await fetch(`${API_BASE_URL}/nearby`);
         if (!res.ok) throw new Error("伺服器回應錯誤");
         
         const result = await res.json();
         
-        // 轉換後端格式給前端使用
         parkingData = (result.nearby || []).map(p => {
             const availCar = p.availablecar !== null ? p.availablecar : -1;
             return {
@@ -247,17 +237,41 @@ async function fetchTaipeiParkingData() {
             };
         });
 
-        console.log(`成功從雲端載入 ${parkingData.length} 筆資料。`);
         handleFilter();
     } catch (err) {
         console.error("雲端資料讀取失敗:", err);
         const listEl = document.getElementById('content-list');
-        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">無法連接雲端伺服器<br><span class="text-xs font-normal text-slate-400">請確認後端是否在正常運作 (${API_BASE_URL})</span></div>`;
+        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">無法連接雲端伺服器</div>`;
     }
 }
 
 // ==========================================
-// 5. 搜尋功能 (整合了朋友的防呆審查 + 我的 Viewbox 限定)
+// 🚀 核心升級一：地址與門牌號碼智慧容錯引擎
+// ==========================================
+async function fetchGeocode(query, limit = 10) {
+    // 1. 正常搜尋 (鎖定台北邊界 Viewbox)
+    let url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=tw&addressdetails=1&viewbox=121.43,25.21,121.67,24.96&bounded=1&limit=${limit}`;
+    let res = await fetch(url, { headers: { 'Accept-Language': 'zh-TW,zh;q=0.9' } });
+    let data = await res.json();
+    
+    // 2. 🤖 門牌容錯機制 (Fallback)
+    // 如果使用者打了「中山北路三段34號」導致 OSM 找不到，我們在這裡直接把「34號」砍掉，只搜路名！
+    if (data.length === 0) {
+        // 正規表達式：移除「數字 + 號」 (例如：34號、105號)
+        let fallbackQuery = query.replace(/[0-9]+\s*號/gi, '').trim();
+        
+        // 如果拔掉門牌後還有字（例如剩下 "中山北路三段"），我們就自動再搜一次！
+        if (fallbackQuery !== query && fallbackQuery.length > 0) {
+            url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(fallbackQuery)}&countrycodes=tw&addressdetails=1&viewbox=121.43,25.21,121.67,24.96&bounded=1&limit=${limit}`;
+            res = await fetch(url, { headers: { 'Accept-Language': 'zh-TW,zh;q=0.9' } });
+            data = await res.json();
+        }
+    }
+    return data;
+}
+
+// ==========================================
+// 5. 搜尋功能與聯想選單主邏輯
 // ==========================================
 async function searchLocation() {
     const query = document.getElementById('searchInput') ? document.getElementById('searchInput').value.trim() : "";
@@ -282,20 +296,17 @@ async function searchLocation() {
     }
 
     window.currentKeyword = null; 
-    if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">🌍 正在台北地區搜尋「${query}」...</div>`;
+    if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">🌍 正在大台北地區搜尋「${query}」...</div>`;
     
     try {
-        // 🚀 結合朋友的強制前綴 與 我們的 Viewbox 強制邊界
-        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent('臺北市 ' + query)}&countrycodes=tw&addressdetails=1&viewbox=121.43,25.21,121.67,24.96&bounded=1&limit=1`;
-        const res = await fetch(url, { headers: { 'Accept-Language': 'zh-TW,zh;q=0.9' } });
-        const data = await res.json();
+        // 呼叫智慧容錯引擎，只拿第1筆最準的
+        const data = await fetchGeocode(query, 1);
         
         if (data.length > 0) {
             const addr = data[0].address || {};
             const city = addr.city || addr.county || '';
             const displayName = data[0].display_name || '';
 
-            // 🛑 保留朋友寫的：嚴格台北防禦限制
             if (!city.includes('台北') && !city.includes('臺北') && !displayName.includes('台北') && !displayName.includes('臺北')) {
                 if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">搜尋失敗<br><span class="text-xs text-slate-400">「${query}」不屬於台北地區！</span></div>`;
                 return;
@@ -304,7 +315,7 @@ async function searchLocation() {
             searchedLocation = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
             
             const district = addr.suburb || addr.town || addr.village || '';
-            const road = addr.road || '';
+            const road = addr.road || addr.pedestrian || '';
             const housenumber = addr.house_number || '';
             let detailAddress = `${city}${district}${road}${housenumber}`;
             if (!detailAddress || detailAddress.length < 3) {
@@ -316,7 +327,7 @@ async function searchLocation() {
             map.flyTo(searchedLocation, 16, {animate: true, duration: 1.5}); 
             collapseBottomSheet();
         } else {
-            if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">在台北市找不到「${query}」<br><span class="text-xs text-slate-400">請輸入台北市內更具體的名字</span></div>`;
+            if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">在大台北找不到「${query}」<br><span class="text-xs text-slate-400">請嘗試輸入較為知名的地標或精簡關鍵字</span></div>`;
         }
     } catch (err) { 
         if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500">搜尋失敗</div>`; 
@@ -335,9 +346,6 @@ function clearSearchAndLocate() {
     if (userLocation) map.flyTo(userLocation, 15, { animate: true });
 }
 
-// ==========================================
-// 6. 資料過濾與地圖標記、卡片列表渲染
-// ==========================================
 function handleFilter() {
     if (parkingData.length === 0) return;
     markerCluster.clearLayers();
@@ -439,7 +447,6 @@ function renderList(data, isUsingDest) {
         const distLabel = isUsingDest ? "📍 距目的地:" : "📍 距您目前:";
         const isTopPick = (index === 0 && !isFull && !hasNoData);
 
-        // 🎯 這裡修正了你朋友寫錯字的 Bug (原本是 startNavNavById)
         listEl.innerHTML += `
             <div id="card-${item.id}" class="parking-card p-3 bg-white border border-slate-200 rounded-xl shadow-sm transition-all duration-300 ${isTopPick ? 'top-card' : ''}">
                 <div class="flex justify-between items-start">
@@ -476,9 +483,6 @@ function selectCard(id, lat, lng) {
     }
 }
 
-// ==========================================
-// 7. 即時路徑導航引擎 (修復朋友寫錯的進入點)
-// ==========================================
 function startNavById(id) {
     const targetItem = parkingData.find(p => p.id === id);
     if (targetItem) startNav(targetItem);
@@ -553,9 +557,6 @@ function stopNavigation() {
     else if (userLocation) map.flyTo(userLocation, 15, { animate: true }); 
 }
 
-// ==========================================
-// 8. 分頁切換與最愛面板管理
-// ==========================================
 function switchTab(tab) {
     currentTab = tab;
     const tabSearch = document.getElementById('tab-search');
@@ -581,7 +582,7 @@ function toggleFav(id) {
 }
 
 // ==========================================
-// 9. 下拉智慧聯想選單 (整合朋友的過濾與視角限制)
+// 🚀 核心升級二：商業級聯想選單排版 (Clean Formatting)
 // ==========================================
 const searchInput = document.getElementById('searchInput');
 let autocompleteList = document.getElementById('autocomplete-list');
@@ -604,10 +605,8 @@ if (searchInput && autocompleteList) {
 
         debounceTimer = setTimeout(async () => {
             try {
-                // 🚀 結合朋友的前綴 與 我們的強制邊界 Viewbox
-                const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent('臺北市 ' + query)}&countrycodes=tw&addressdetails=1&viewbox=121.43,25.21,121.67,24.96&bounded=1&limit=10`;
-                const res = await fetch(url);
-                const suggestions = await res.json();
+                // 呼叫智慧容錯引擎，預先載入最多 10 筆關聯字
+                const suggestions = await fetchGeocode(query, 10);
 
                 if (suggestions.length > 0) {
                     let hasVisibleItems = false;
@@ -617,7 +616,7 @@ if (searchInput && autocompleteList) {
                     searchAllDiv.className = 'p-3 hover:bg-blue-50 cursor-pointer border-b border-slate-100 flex items-center gap-3 transition';
                     searchAllDiv.innerHTML = `
                         <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold flex-shrink-0">🔍</div>
-                        <div class="text-sm text-slate-800 font-bold flex-1">搜尋「${query}」台北周邊車位</div>
+                        <div class="text-sm text-slate-800 font-bold flex-1">搜尋「${query}」周邊車位</div>
                     `;
                     searchAllDiv.addEventListener('click', () => { autocompleteList.classList.add('hidden'); searchLocation(); });
                     autocompleteList.appendChild(searchAllDiv);
@@ -627,21 +626,25 @@ if (searchInput && autocompleteList) {
                         const city = addr.city || addr.county || '';
                         const displayName = place.display_name || '';
 
-                        // 🛑 朋友寫的防禦：非台北區域，拒絕渲染
                         if (!city.includes('台北') && !city.includes('臺北') && !displayName.includes('台北') && !displayName.includes('臺北')) {
                             return; 
                         }
 
                         hasVisibleItems = true;
+                        
+                        // 🌟 商業級排版：主副標題乾淨分離
+                        // 主標題：只取真正的名字，或逗號前第一段 (例如：麥當勞-台北舊宗餐廳)
                         const shortName = place.name || displayName.split(',')[0];
                         
+                        // 副標題：強制自己拼出「乾淨的路段地址」
                         const district = addr.suburb || addr.town || addr.village || '';
-                        const road = addr.road || '';
+                        const road = addr.road || addr.pedestrian || '';
                         const housenumber = addr.house_number || '';
                         
                         let detailAddress = `${city}${district}${road}${housenumber}`;
+                        // 如果 OSM 資料太爛，連路名都沒有給，我們才拿冗長的備用字串
                         if (!detailAddress || detailAddress.length < 3) {
-                            detailAddress = displayName.split(',').reverse().join('').trim();
+                            detailAddress = displayName.replace(shortName, '').replace(/^,/, '').trim();
                         }
 
                         const div = document.createElement('div');
@@ -681,7 +684,7 @@ if (searchInput && autocompleteList) {
     });
 
     function renderNoResults() {
-        autocompleteList.innerHTML = `<div class="p-4 text-center text-sm text-slate-400 font-bold">在台北地區找不到「${searchInput.value.trim()}」😢<br><span class="text-xs font-normal">請輸入台北市內更具體的店家或地址</span></div>`;
+        autocompleteList.innerHTML = `<div class="p-4 text-center text-sm text-slate-400 font-bold">在大台北找不到「${searchInput.value.trim()}」😢<br><span class="text-xs font-normal">請輸入更具體的店家名稱或路段</span></div>`;
         autocompleteList.classList.remove('hidden');
     }
 
@@ -692,9 +695,6 @@ if (searchInput && autocompleteList) {
     });
 }
 
-// ==========================================
-// 10. 建立搜尋地標與綠色文字膠囊常駐標籤
-// ==========================================
 function createSearchMarker(name, lat, lng, address = "") {
     if (destMarker) map.removeLayer(destMarker);
 
@@ -707,7 +707,6 @@ function createSearchMarker(name, lat, lng, address = "") {
 
     destMarker = L.marker([lat, lng], { icon: customIcon }).addTo(map);
 
-    // 🌟 常駐顯示綠色地名標籤膠囊 (圖六效果)
     destMarker.bindTooltip(name, {
         permanent: true,
         direction: 'top',
@@ -716,7 +715,7 @@ function createSearchMarker(name, lat, lng, address = "") {
     });
 
     const searchQuery = address ? `${name} ${address}` : name;
-    const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(searchQuery)}`;
+    const googleMapsUrl = `http://googleusercontent.com/maps.google.com/?q=${encodeURIComponent(searchQuery)}`;
 
     const popupContent = `
         <div style="padding: 10px; font-family: sans-serif; min-w-[180px]; text-align: left;">
