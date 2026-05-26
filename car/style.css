@@ -112,3 +112,18 @@ html, body { height: 100vh; width: 100vw; margin: 0; padding: 0; }
     background-color: #ffffff !important;
     border: 2px solid #10b981 !important;
 }
+
+
+/* 🔧 拔掉搜尋標籤下方的綠色小箭頭 */
+.leaflet-tooltip-top.custom-map-label::before,
+.leaflet-tooltip-bottom.custom-map-label::before,
+.leaflet-tooltip-left.custom-map-label::before,
+.leaflet-tooltip-right.custom-map-label::before {
+    display: none !important; /* 直接隱藏箭頭元素 */
+}
+
+/* 確保 Leaflet 預設的邊框干擾被清除 */
+.leaflet-tooltip.custom-map-label {
+    background-color: #ffffff !important;
+    border: 2px solid #10b981 !important;
+}
