@@ -46,7 +46,7 @@
                 <div class="flex flex-col gap-2">
                     <div class="flex gap-1.5 relative">
                         <div class="relative flex-1">
-                            <input type="text" id="searchInput" autocomplete="off" onkeydown="if(event.key === 'Enter') searchLocation()" placeholder="搜尋停車場、超商或地點..." 
+                            <input type="text" id="searchInput" autocomplete="off" onkeydown="if(event.key === 'Enter') searchLocation()" placeholder="搜尋停車場或地點" 
                                    class="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-400 focus:bg-blue-50 transition">
                             
                             <div id="autocomplete-list" class="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl hidden max-h-[40vh] overflow-y-auto z-[5000]">
@@ -81,7 +81,7 @@
                 </div>
 
                 <div id="content-list" class="flex-1 overflow-y-auto p-3 space-y-2.5 bg-slate-50/50 md:bg-white no-scrollbar pb-10 overscroll-contain">
-                    <div class="text-center py-20 text-slate-400 font-bold">📡 正在連接 Aiven 雲端資料庫...</div>
+                    <div class="text-center py-20 text-slate-400 font-bold animate-pulse">📡 載入資料中...</div>
                 </div>
             </div>
         </div>
