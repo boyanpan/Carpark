@@ -1,6 +1,6 @@
 proj4.defs("EPSG:3826", "+proj=tmerc +lat_0=0 +lon_0=121 +k=0.9999 +x_0=250000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs");
 
-// 初始化地圖 (預設定位在台北 101，若 GPS 成功會自動飛過去)
+// 初始化地圖
 const map = L.map('map', { zoomControl: false, tap: false }).setView([25.0339, 121.5644], 14);
 L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png').addTo(map);
 const markerCluster = L.markerClusterGroup({ chunkedLoading: true, disableClusteringAtZoom: 16, maxClusterRadius: 60 });
@@ -11,17 +11,15 @@ let userMarker = null, searchedLocation = null, destMarker = null, radiusCircle 
 let routingControl = null, isNavigating = false, currentDestination = null, currentTab = 'search';
 let favorites = JSON.parse(localStorage.getItem('p_favs')) || [];
 
-// 取得 UI 元件 (加上防錯機制)
+// 取得 UI 元件
 const bottomSheet = document.getElementById('bottom-sheet');
 const searchPanel = document.getElementById('search-panel');
 const dragHandle = document.getElementById('drag-handle');
 const sheetArrow = document.getElementById('sheet-arrow');
 let startY = 0, currentHeight = 0, isSheetExpanded = false;
 
-// 手機板初始化高度
 if (window.innerWidth < 768 && bottomSheet) bottomSheet.style.height = '35vh';
 
-// 點擊箭頭展開或收合
 window.toggleBottomSheet = function() {
     if (window.innerWidth >= 768 || !bottomSheet) return;
     isSheetExpanded = !isSheetExpanded;
@@ -43,7 +41,6 @@ function collapseBottomSheet() {
     }
 }
 
-// 拖拽面板功能
 if (dragHandle && bottomSheet) {
     dragHandle.addEventListener('touchstart', (e) => {
         startY = e.touches[0].clientY;
@@ -73,7 +70,6 @@ if (dragHandle && bottomSheet) {
     });
 }
 
-// 拖動地圖時隱藏面板
 map.on('dragstart', () => {
     if (window.innerWidth < 768 && !isNavigating) {
         if (searchPanel) searchPanel.style.transform = 'translateY(-100%)';
@@ -88,7 +84,6 @@ map.on('dragend', () => {
     }
 });
 
-// 地圖點擊定位功能
 map.on('click', function(e) {
     if (isNavigating) return;
     const clickedLat = e.latlng.lat;
@@ -139,6 +134,7 @@ function initCompass() {
     }
 }
 
+// 🧮 錯字距離演算法（Levenshtein Distance）
 function getLevenshteinDistance(a, b) {
     const matrix = [];
     for (let i = 0; i <= b.length; i++) matrix[i] = [i];
@@ -155,19 +151,20 @@ function getLevenshteinDistance(a, b) {
     return matrix[b.length][a.length];
 }
 
-// 🛠️【核心改良】超強音近字、異體字智慧同義轉換引擎
+// 🛠️【文字同音同義標準化】
 function normalizeText(str) {
     if (!str) return "";
     let s = str.trim().toLowerCase();
-    // 異體字與極度常見錯字替換一網打盡
     s = s.replace(/台/g, '臺')
          .replace(/[徳德]/g, '德')
          .replace(/[関關]/g, '關')
          .replace(/[沢澤]/g, '澤')
-         .replace(/[成城陳沉臣]/g, '承') // 承德路同音字大打通
+         .replace(/[成城陳沉臣]/g, '承')
          .replace(/[得特]/g, '德')     
          .replace(/[路錄陸露]/g, '路')   
-         .replace(/[段斷]/g, '段');
+         .replace(/[段斷]/g, '段')
+         .replace(/[臨林淋鄰]/g, '臨')
+         .replace(/[督度渡都]/g, '渡'); // 處理關渡/關督
     return s;
 }
 
@@ -178,7 +175,6 @@ function smartMatch(targetStr, queryStr) {
     
     if (t.includes(q) || q.includes(t)) return true;
     
-    // 如果字串被嚴重打散，計算碎片相交率 (只要有 2 個字以上的連續字串咬中就過)
     if (q.length >= 3) {
         let matchCount = 0;
         for (let i = 0; i < q.length - 1; i++) {
@@ -186,13 +182,6 @@ function smartMatch(targetStr, queryStr) {
             if (t.includes(chunk)) matchCount++;
         }
         if (matchCount >= Math.floor(q.length / 2)) return true;
-    }
-    
-    if (q.includes('醫院')) {
-        const coreKeyword = q.replace('醫院', '').trim();
-        if (coreKeyword && t.includes(normalizeText(coreKeyword)) && (t.includes('醫院') || t.includes('院區') || t.includes('醫療'))) {
-            return true;
-        }
     }
     return false;
 }
@@ -337,7 +326,7 @@ function initGPS() {
     );
 }
 
-// 🚀 ✨【終極全自動模糊容錯搜尋定位演算法】
+// 🚀 ✨【終極智慧全自動模糊容錯搜尋定位演算法 3.5 版本】
 async function searchLocation() {
     const queryInput = document.getElementById('searchInput');
     let rawQuery = queryInput ? queryInput.value.trim() : "";
@@ -358,21 +347,22 @@ async function searchLocation() {
 
     if (!roadOnlyQuery) roadOnlyQuery = cleanQuery;
 
-    console.log("【3.0 容錯大脑】優化後字串:", roadOnlyQuery);
+    console.log(`「${rawQuery}」未精準匹配，啟動背景錯字校正尋找最接近目標...`);
 
-    // 3️⃣ 策略一：直接從本地停車場資料庫硬核搜尋 (利用強化的碎片與音近演算法)
+    // 3️⃣ 策略一：直接從本地停車場資料庫精準或智慧碎片搜尋
     let localMatches = parkingData.filter(p => 
         smartMatch(p.name, roadOnlyQuery) || smartMatch(p.destName, roadOnlyQuery) || smartMatch(p.address, roadOnlyQuery)
     );
 
     if (localMatches.length > 0) {
-        console.log(`【容錯成功】找到 ${localMatches.length} 筆關聯停車場，強制鎖定該地區！`);
-        // 取得最靠近資料庫前端或中央的目標點
         const centerMatch = localMatches[0];
+        const distanceError = getLevenshteinDistance(normalizeText(centerMatch.destName), normalizeText(roadOnlyQuery));
+        console.log(`🎯 錯字自動校正成功！最接近目標為：${centerMatch.destName}（錯字數: ${distanceError > 5 ? '碎片模糊匹配' : distanceError}）`);
+        
         searchedLocation = [centerMatch.lat, centerMatch.lng];
         window.currentKeyword = roadOnlyQuery; // 過濾列表
         
-        createSearchMarker(rawQuery, centerMatch.lat, centerMatch.lng, centerMatch.address);
+        createSearchMarker(centerMatch.destName, centerMatch.lat, centerMatch.lng, centerMatch.address);
         handleFilter(); 
         
         const bounds = L.latLngBounds(localMatches.map(p => [p.lat, p.lng]));
@@ -380,65 +370,74 @@ async function searchLocation() {
         return;
     }
 
-    // 4️⃣ 策略二：如果本地攔截未果，使用最乾淨的路名交付 Nominatim API 撈取
+    // 4️⃣ 策略二：本地防線落空，使用 Nominatim API 進行外部「地址與地名」撈取與強制插旗 (解決地址找不到的問題)
     const callNominatimAPI = async (searchText) => {
         try {
             const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchText)}&countrycodes=tw&viewbox=121.0,24.8,122.0,25.3&bounded=1&limit=1`;
             const res = await fetch(url, { headers: { 'Accept-Language': 'zh-TW,zh;q=0.9' } });
-            const data = await res.json();
-            return data.length > 0 ? data[0] : null;
+            return await res.json();
         } catch (e) { return null; }
     };
 
-    // 嘗試用最乾淨的路名去找
-    let apiResult = await callNominatimAPI(roadOnlyQuery);
-    
-    // 如果因為錯字 API 回傳失敗，拿原本帶有錯字的 rawQuery 做最後嘗試
-    if (!apiResult) {
-        apiResult = await callNominatimAPI(rawQuery);
+    let apiData = await callNominatimAPI(rawQuery);
+    if (!apiData || apiData.length === 0) {
+        apiData = await callNominatimAPI(roadOnlyQuery);
     }
 
-    if (apiResult) {
-        const lat = parseFloat(apiResult.lat);
-        const lon = parseFloat(apiResult.lon);
+    if (apiData && apiData.length > 0) {
+        console.log(`🎯 外部地址庫匹配成功！定位至輸入地點。`);
+        const lat = parseFloat(apiData[0].lat);
+        const lon = parseFloat(apiData[0].lon);
         searchedLocation = [lat, lon];
         window.currentKeyword = null; 
-        createSearchMarker(rawQuery, lat, lon, apiResult.display_name);
-        handleFilter();
+
+        // 【關鍵修復】：即使找不到特定停車場，也要在地圖上為使用者輸入的地址插旗並飛過去！
+        createSearchMarker(rawQuery, lat, lon, apiData[0].display_name);
+        handleFilter(); // 重新整理列表，會自動以這個新地址為中心排序附近的停車場
         return;
     }
 
-    // 5️⃣ 策略三：超級極限兜底 - 依字母重疊度做全面掃描 (就算牛頭不對馬嘴，也找最像的)
+    // 5️⃣ 策略三：超級極限兜底 - 計算 Levenshtein 距離或重疊度，找出全資料庫文字最像的一個
     let bestMatch = null;
+    let minDistance = 999;
     let maxOverlap = 0;
 
     parkingData.forEach(p => {
-        const normAddr = normalizeText(p.address);
         const normName = normalizeText(p.destName);
-        let overlap = 0;
-        
-        // 用 2 個字的滑動視窗算重複率
-        for(let i=0; i<roadOnlyQuery.length-1; i++) {
-            const chunk = roadOnlyQuery.substring(i, i+2);
-            if(normAddr.includes(chunk) || normName.includes(chunk)) overlap++;
-        }
-        
-        if (overlap > maxOverlap) {
-            maxOverlap = overlap;
+        const dist = getLevenshteinDistance(normName, roadOnlyQuery);
+        if (dist < minDistance) {
+            minDistance = dist;
             bestMatch = p;
         }
     });
 
-    if (bestMatch && maxOverlap >= 1) {
-        console.log("【極限兜底命中】相似度最高的停車場為:", bestMatch.name);
+    // 如果字串長度差距大，改用碎片重疊率兜底
+    if (minDistance > 4) {
+        parkingData.forEach(p => {
+            const normAddr = normalizeText(p.address);
+            const normName = normalizeText(p.destName);
+            let overlap = 0;
+            for(let i=0; i<roadOnlyQuery.length-1; i++) {
+                const chunk = roadOnlyQuery.substring(i, i+2);
+                if(normAddr.includes(chunk) || normName.includes(chunk)) overlap++;
+            }
+            if (overlap > maxOverlap) {
+                maxOverlap = overlap;
+                bestMatch = p;
+            }
+        });
+    }
+
+    if (bestMatch && (minDistance <= 4 || maxOverlap >= 1)) {
+        console.log(`🎯 錯字自動校正成功！最接近目標為：${bestMatch.destName}（估算錯字數: ${minDistance}）`);
         searchedLocation = [bestMatch.lat, bestMatch.lng];
         window.currentKeyword = null;
-        createSearchMarker(rawQuery, bestMatch.lat, bestMatch.lng, bestMatch.address);
+        createSearchMarker(bestMatch.destName, bestMatch.lat, bestMatch.lng, bestMatch.address);
         handleFilter();
         return;
     }
 
-    // 6️⃣ 終極回退 (全台灣都翻不出來)
+    // 6️⃣ 終極回退 (連外部地圖集都翻不出來)
     const fallbackLoc = userLocation || [25.0339, 121.5644];
     searchedLocation = fallbackLoc;
     window.currentKeyword = null;
@@ -448,7 +447,7 @@ async function searchLocation() {
     if (listEl) {
         listEl.innerHTML = `<div class="text-center py-20 text-amber-600 font-bold">
             ⚠️ 無法識別「${rawQuery}」<br>
-            <span class="text-xs text-slate-400 font-medium">請檢查字詞是否有大範圍缺失，或者您可以直接點擊地圖挑選！</span>
+            <span class="text-xs text-slate-400 font-medium">請檢查字詞，或者您可以直接點擊地圖選定位置！</span>
         </div>`;
     }
 }
@@ -628,6 +627,19 @@ function startNav(item) {
     updateRoute();
 }
 
+// 🗺️ 轉譯導航英文指令
+function translateInstruction(text) {
+    if(!text) return "";
+    return text.replace(/Head south/i, "一路向南行駛")
+               .replace(/Head north/i, "一路向北行駛")
+               .replace(/Head east/i, "一路向東行駛")
+               .replace(/Head west/i, "一路向西行駛")
+               .replace(/Head /i, "朝前方出發 ")
+               .replace(/Make a U-turn/i, "進行迴轉")
+               .replace(/Turn right/i, "右轉")
+               .replace(/Turn left/i, "左轉");
+}
+
 function updateRoute() {
     if (!isNavigating || !userLocation || !currentDestination) return;
     
@@ -660,7 +672,10 @@ function updateRoute() {
             const navArrow = document.getElementById('nav-arrow');
             const navInstruction = document.getElementById('nav-instruction');
             if (navArrow) navArrow.innerText = arrow;
-            if (navInstruction) navInstruction.innerText = `${Math.round(nextStep.distance)}m 後，${nextStep.text}`;
+            
+            // 修正英文字眼轉成中文提示
+            const zhText = translateInstruction(nextStep.text);
+            if (navInstruction) navInstruction.innerText = `${Math.round(nextStep.distance)}m 後，${zhText}`;
         }
         const navMetrics = document.getElementById('nav-metrics');
         if (navMetrics) navMetrics.innerText = `總剩餘 ${(route.summary.totalDistance / 1000).toFixed(1)} km | 約 ${Math.round(route.summary.totalTime / 60)} 分鐘抵達`;
