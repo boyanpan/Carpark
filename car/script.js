@@ -1,13 +1,9 @@
-// ==========================================
-// Proj4 座標定義 (保留供未來轉換參考)
-// ==========================================
 proj4.defs("EPSG:3826", "+proj=tmerc +lat_0=0 +lon_0=121 +k=0.9999 +x_0=250000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs");
 
-// ==========================================
-// 1. 初始化地圖與全域變數 (預設定位在台北 101)
-// ==========================================
+// 初始化地圖
 const map = L.map('map', { zoomControl: false, tap: false }).setView([25.0339, 121.5644], 14);
 L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png').addTo(map);
+
 const markerCluster = L.markerClusterGroup({ chunkedLoading: true, disableClusteringAtZoom: 16, maxClusterRadius: 60 });
 map.addLayer(markerCluster);
 
@@ -16,21 +12,21 @@ let userMarker = null, searchedLocation = null, destMarker = null, radiusCircle 
 let routingControl = null, isNavigating = false, currentDestination = null, currentTab = 'search';
 let favorites = JSON.parse(localStorage.getItem('p_favs')) || [];
 
-// 取得 UI 元件 (加上防錯機制)
+// UI 元件 (加上防錯機制)
 const bottomSheet = document.getElementById('bottom-sheet');
 const searchPanel = document.getElementById('search-panel');
 const dragHandle = document.getElementById('drag-handle');
 const sheetArrow = document.getElementById('sheet-arrow');
 let startY = 0, currentHeight = 0, isSheetExpanded = false; 
 
-if (window.innerWidth < 768 && bottomSheet) bottomSheet.style.height = '35vh'; 
+if (window.innerWidth < 768 && bottomSheet) bottomSheet.style.height = '35vh';
 
 window.toggleBottomSheet = function() {
     if (window.innerWidth >= 768 || !bottomSheet) return;
     isSheetExpanded = !isSheetExpanded;
     if (isSheetExpanded) {
         bottomSheet.style.height = '85vh';
-        if (sheetArrow) sheetArrow.style.transform = 'rotate(180deg)'; 
+        if (sheetArrow) sheetArrow.style.transform = 'rotate(180deg)';
     } else {
         bottomSheet.style.height = '35vh';
         if (sheetArrow) sheetArrow.style.transform = 'rotate(0deg)';   
@@ -46,14 +42,12 @@ function collapseBottomSheet() {
     }
 }
 
-// 僅在拖曳元件存在時綁定事件，防止報錯
 if (dragHandle && bottomSheet) {
     dragHandle.addEventListener('touchstart', (e) => {
         startY = e.touches[0].clientY;
         currentHeight = bottomSheet.getBoundingClientRect().height;
         bottomSheet.style.transition = 'none';
     }, {passive: true});
-
     dragHandle.addEventListener('touchmove', (e) => {
         let newHeight = currentHeight + (startY - e.touches[0].clientY);
         const winH = window.innerHeight;
@@ -61,7 +55,6 @@ if (dragHandle && bottomSheet) {
         if (newHeight < winH * 0.20) newHeight = winH * 0.20; 
         bottomSheet.style.height = `${newHeight}px`;
     }, {passive: true});
-
     dragHandle.addEventListener('touchend', () => {
         bottomSheet.style.transition = 'height 0.3s cubic-bezier(0.25, 1, 0.5, 1)';
         const finalHeight = bottomSheet.getBoundingClientRect().height;
@@ -90,9 +83,6 @@ map.on('dragend', () => {
     }
 });
 
-// ==========================================
-// 2. 指南針與定位朝向控制
-// ==========================================
 function updateCarIcon() {
     if (userMarker) {
         const carIconHtml = `<div class="car-marker-container" style="transform: rotate(${currentHeading}deg);"><div class="car-marker">🚘</div></div>`;
@@ -108,7 +98,7 @@ function handleOrientation(event) {
         heading = 360 - event.alpha;
     }
     if (heading !== null) {
-        hasCompass = true; 
+        hasCompass = true;
         currentHeading = heading;
         updateCarIcon(); 
     }
@@ -129,6 +119,24 @@ function initCompass() {
     }
 }
 
+// 計算文字錯字距離演算法 (Levenshtein Distance)
+function getLevenshteinDistance(a, b) {
+    const matrix = [];
+    for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+    for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+    for (let i = 1; i <= b.length; i++) {
+        for (let j = 1; j <= a.length; j++) {
+            if (b.charAt(i - 1) === a.charAt(j - 1)) {
+                matrix[i][j] = matrix[i - 1][j - 1];
+            } else {
+                matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1));
+            }
+        }
+    }
+    return matrix[b.length][a.length];
+}
+
+// 智慧匹配
 function smartMatch(targetStr, queryStr) {
     if (!targetStr || !queryStr) return false;
     const normalize = str => str.replace(/台/g, '臺').trim().toLowerCase();
@@ -137,7 +145,7 @@ function smartMatch(targetStr, queryStr) {
     
     if (t.includes(q)) return true;
     if (q.includes('醫院')) {
-        const coreKeyword = q.replace('醫院', '').trim(); 
+        const coreKeyword = q.replace('醫院', '').trim();
         if (coreKeyword && t.includes(coreKeyword) && (t.includes('醫院') || t.includes('院區') || t.includes('醫療'))) {
             return true;
         }
@@ -145,9 +153,7 @@ function smartMatch(targetStr, queryStr) {
     return false;
 }
 
-// ==========================================
-// 3. 異步載入台北市公用停車場資料 (直連市府 Blob 測試版)
-// ==========================================
+// 獲取臺北市停車場資料
 async function fetchTaipeiParkingData() {
     try {
         console.log("正在下載台北市停車場資料...");
@@ -159,7 +165,7 @@ async function fetchTaipeiParkingData() {
         const availJson = await availRes.json();
         const availMap = {};
         availJson.data.park.forEach(p => availMap[p.id] = p);
-
+        
         const categorize = (name) => {
             if (!name) return '一般停車場';
             if (['醫院', '榮長', '三總', '馬偕', '長庚', '醫學院', '院區'].some(k => name.includes(k))) return '🏥 醫療院所';
@@ -168,7 +174,7 @@ async function fetchTaipeiParkingData() {
             if (['嘟嘟房', '台灣聯通', '應安', '車亭', '日月亭', '叭叭房'].some(k => name.includes(k))) return '🅿️ 連鎖集團';
             return '一般停車場';
         };
-
+        
         const cleanStoreName = (rawName) => {
             let name = rawName.trim();
             const isDestination = /(家樂福|大潤發|好市多|全聯|IKEA|SOGO|新光三越|遠百|微風|誠品|醫院|院區)/.test(name);
@@ -180,7 +186,7 @@ async function fetchTaipeiParkingData() {
                     else if (!/[店館城心區]/.test(name.slice(-1))) name += '店';
                 }
                 if (name.includes('醫院') || name.includes('院區')) {
-                    name = name.replace(/臺北市立聯合醫院/g, '聯合醫院'); 
+                    name = name.replace(/臺北市立聯合醫院/g, '聯合醫院');
                     name = name.replace(/附設地下停車場|附設停車場|地下停車場|立體停車場|平面停車場|停車場/g, '').trim();
                 }
             }
@@ -196,7 +202,7 @@ async function fetchTaipeiParkingData() {
             }
             return 0;
         };
-
+        
         parkingData = descJson.data.park.map(p => {
             const avail = availMap[p.id] || {};
             let lat = 25.0339, lng = 121.5644;
@@ -218,9 +224,9 @@ async function fetchTaipeiParkingData() {
             return {
                 id: p.id, 
                 name: p.name,
-                category: categorize(p.name), prediction: availCar <= 0 ? (availCar < 0 ? "無預測資料" : "已客滿") : "車位充足",
                 destName: finalCleanName, 
                 lat: lat, lng: lng, address: p.address || '無地址', payex: p.payex || '現場公告', time: p.servicetime || '依公告',
+                category: categorize(p.name), prediction: availCar <= 0 ? (availCar < 0 ? "無預測資料" : "已客滿") : "車位充足",
                 car: { t: p.totalcar || 0, a: availCar }, 
                 motor: { t: p.totalmotor || 0, a: avail.availablemotor !== undefined ? avail.availablemotor : -1 },
                 right: { t: totalRight },
@@ -234,7 +240,7 @@ async function fetchTaipeiParkingData() {
     } catch (error) {
         console.error("API 載入失敗原因:", error);
         const listEl = document.getElementById('content-list');
-        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">資料載入失敗 (請檢查網路或 CORS 限制)</div>`;
+        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">資料載入失敗</div>`;
     }
 }
 
@@ -244,8 +250,10 @@ function getBearing(lat1, lon1, lat2, lon2) {
     const x = Math.cos(lat1 * toRad) * Math.sin(lat2 * toRad) - Math.sin(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.cos((lon2 - lon1) * toRad);
     return (Math.atan2(y, x) * toDeg + 360) % 360;
 }
+
 function calculateDistance(lat1, lon1, lat2, lon2) {
-    const R = 6371; const dLat = (lat2 - lat1) * Math.PI / 180, dLon = (lon2 - lon1) * Math.PI / 180;
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180, dLon = (lon2 - lon1) * Math.PI / 180;
     const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
     return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
 }
@@ -259,11 +267,8 @@ function initGPS() {
             userLocation = [latitude, longitude];
             
             if (!hasCompass) {
-                if (heading !== null && !isNaN(heading)) {
-                    currentHeading = heading; 
-                } else if (previousLocation) {
-                    currentHeading = getBearing(previousLocation[0], previousLocation[1], latitude, longitude);
-                }
+                if (heading !== null && !isNaN(heading)) currentHeading = heading; 
+                else if (previousLocation) currentHeading = getBearing(previousLocation[0], previousLocation[1], latitude, longitude);
             }
             previousLocation = [latitude, longitude];
 
@@ -272,7 +277,7 @@ function initGPS() {
                 userMarker = L.marker(userLocation, { icon: L.divIcon({ html: carIconHtml, className: '' }), zIndexOffset: 1000 }).addTo(map);
             } else { 
                 userMarker.setLatLng(userLocation); 
-                updateCarIcon(); 
+                updateCarIcon();
             }
 
             const gpsDot = document.getElementById('gps-dot');
@@ -282,28 +287,31 @@ function initGPS() {
             if (isNavigating) map.setView(userLocation, 18, { animate: true, pan: { duration: 0.5 } });
         },
         (err) => { 
-            console.warn("GPS 定位取得失敗:", err.message);
             const gpsDot = document.getElementById('gps-dot');
-            if (gpsDot) gpsDot.className = "w-2 h-2 bg-red-500 rounded-full"; 
+            if (gpsDot) gpsDot.className = "w-2 h-2 bg-red-500 rounded-full";
         },
         { enableHighAccuracy: true, maximumAge: 2000 }
     );
 }
 
-// ==========================================
-// 4. 🔥 智慧核心：搜尋全台北市生活地標、店家與行政區
-// ==========================================
+// 按下搜尋後，自動校正錯字並尋找最接近目標
 async function searchLocation() {
-    const query = document.getElementById('searchInput') ? document.getElementById('searchInput').value.trim() : "";
+    const queryInput = document.getElementById('searchInput');
+    const query = queryInput ? queryInput.value.trim() : "";
     if (!query) return clearSearchAndLocate();
     
     collapseBottomSheet();
-
-    let localMatches = parkingData.filter(p => 
-        smartMatch(p.name, query) || smartMatch(p.destName, query) || smartMatch(p.address, query) || smartMatch(p.category, query)
-    );
-
     const listEl = document.getElementById('content-list');
+
+    // 1. 精準匹配判定
+    const isLifeKeyword = /(小吃|超商|飯店|酒店|便利商店|餐廳|咖啡|美食|7-11|全家|萊爾富|OK|夜市)/i.test(query);
+    let localMatches = [];
+    if (!isLifeKeyword) {
+        localMatches = parkingData.filter(p => 
+            smartMatch(p.name, query) || smartMatch(p.destName, query) || smartMatch(p.address, query)
+        );
+    }
+
     if (localMatches.length > 0) {
         if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-blue-500 font-bold">🔍 找到 ${localMatches.length} 筆相關地點...</div>`;
         window.currentKeyword = query;
@@ -312,49 +320,52 @@ async function searchLocation() {
         
         const bounds = L.latLngBounds(localMatches.map(p => [p.lat, p.lng]));
         map.fitBounds(bounds, { padding: [50, 50], animate: true, maxZoom: 15 });
-        return; 
+        return;
     }
 
-    window.currentKeyword = null; 
-    if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">🌍 正在台北地區搜尋「${query}」...</div>`;
-    
+    // 2. 錯字自動校正 (最接近尋找)
+    let bestMatch = null;
+    let minDistance = Infinity;
+
+    parkingData.forEach(p => {
+        const targetChunk = p.destName.substring(0, query.length);
+        const dist = getLevenshteinDistance(targetChunk, query);
+        if (dist < minDistance) {
+            minDistance = dist;
+            bestMatch = p;
+        }
+    });
+
+    if (bestMatch && minDistance <= 2) {
+        if (queryInput) queryInput.value = bestMatch.destName;
+        searchedLocation = [bestMatch.lat, bestMatch.lng];
+        window.currentKeyword = null;
+
+        createSearchMarker(bestMatch.destName, bestMatch.lat, bestMatch.lng, bestMatch.address);
+        handleFilter();
+        return;
+    }
+
+    // 3. 呼叫 Nominatim 外部地圖查詢
+    if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">🌍 正在搜尋「${query}」...</div>`;
     try {
-        // 🚀 強制加上「臺北市」前綴與開啟詳細地址結構，限縮核心範圍在台北
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent('臺北市 ' + query)}&countrycodes=tw&addressdetails=1&limit=1`);
+        let searchQuery = query;
+        if (!searchQuery.includes('台北') && !searchQuery.includes('臺北')) {
+            searchQuery = '臺北市 ' + searchQuery;
+        }
+
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&countrycodes=tw&limit=1`);
         const data = await res.json();
-        
         if (data.length > 0) {
-            const addr = data[0].address || {};
-            const city = addr.city || addr.county || '';
-            const displayName = data[0].display_name || '';
-
-            // 🛑 嚴格台北防禦限制：非台北區域，拒絕回傳結果
-            if (!city.includes('台北') && !city.includes('臺北') && !displayName.includes('台北') && !displayName.includes('臺台')) {
-                if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">搜尋失敗<br><span class="text-xs text-slate-400">「${query}」不屬於台北地區！</span></div>`;
-                return;
-            }
-
             searchedLocation = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
-            
-            const district = addr.suburb || addr.town || addr.village || '';
-            const road = addr.road || '';
-            const housenumber = addr.house_number || '';
-            let detailAddress = `${city}${district}${road}${housenumber}`;
-            if (!detailAddress || detailAddress.length < 3) {
-                detailAddress = displayName.split(',').reverse().join('').trim();
-            }
-
-            // 在地圖上精準釘上 📍 大頭針，並且常駐顯示綠色膠囊文字標籤
-            createSearchMarker(query, searchedLocation[0], searchedLocation[1], detailAddress);
-            
-            handleFilter(); 
-            map.flyTo(searchedLocation, 16, {animate: true, duration: 1.5}); 
+            createSearchMarker(query, searchedLocation[0], searchedLocation[1], data[0].display_name);
+            handleFilter();
             collapseBottomSheet();
         } else {
-            if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">在台北市找不到「${query}」<br><span class="text-xs text-slate-400">請輸入台北市內更具體的名字</span></div>`;
+            if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">找不到「${query}」<br><span class="text-xs text-slate-400">請確認名字是否輸入正確</span></div>`;
         }
     } catch (err) { 
-        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500">搜尋失敗</div>`; 
+        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500">搜尋失敗</div>`;
     }
 }
 
@@ -370,15 +381,11 @@ function clearSearchAndLocate() {
     if (userLocation) map.flyTo(userLocation, 15, { animate: true });
 }
 
-// ==========================================
-// 5. 資料分析過濾器與地圖標記、卡片列表渲染
-// ==========================================
 function handleFilter() {
     if (parkingData.length === 0) return;
     markerCluster.clearLayers();
     
     let data = (currentTab === 'search') ? [...parkingData] : parkingData.filter(p => favorites.includes(p.id));
-    
     const radiusSelect = document.getElementById('radiusSelect');
     const radiusMeters = radiusSelect ? parseFloat(radiusSelect.value) : 99999;
     const refLocation = searchedLocation || userLocation;
@@ -387,10 +394,7 @@ function handleFilter() {
 
     if (window.currentKeyword) {
         data = data.filter(p => 
-            smartMatch(p.name, window.currentKeyword) || 
-            smartMatch(p.destName, window.currentKeyword) || 
-            smartMatch(p.address, window.currentKeyword) || 
-            smartMatch(p.category, window.currentKeyword)
+            smartMatch(p.name, window.currentKeyword) || smartMatch(p.destName, window.currentKeyword) || smartMatch(p.address, window.currentKeyword)
         );
     }
 
@@ -401,8 +405,6 @@ function handleFilter() {
             radiusCircle = L.circle(refLocation, { color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.08, radius: radiusMeters, weight: 1.5 }).addTo(map);
         }
         data.sort((a, b) => a.distance - b.distance);
-    } else if (window.currentKeyword) {
-         data.sort((a, b) => a.name.localeCompare(b.name));
     }
 
     renderMapMarkers(data);
@@ -412,7 +414,6 @@ function handleFilter() {
 function renderMapMarkers(data) {
     markerCluster.clearLayers();
     const markers = [];
-    
     data.forEach(item => {
         const isFull = item.car.a === 0;
         const color = item.car.a < 0 ? '#94a3b8' : (isFull ? '#ef4444' : (item.car.a <= 10 ? '#f59e0b' : '#10b981'));
@@ -435,14 +436,12 @@ function renderMapMarkers(data) {
 
         const buildRow = (icon, label, d, isSpecial = false) => {
             if(d.t <= 0) return ''; 
-            if (isSpecial) {
-                return `<div class="flex justify-between items-center border-b border-slate-100 py-1.5 last:border-0"><span class="text-slate-600 font-bold text-xs flex items-center gap-1.5"><span class="text-sm">${icon}</span> ${label}</span><span class="font-mono text-xs text-slate-500 font-black">配置 ${d.t} 格</span></div>`;
-            }
+            if (isSpecial) return `<div class="flex justify-between items-center border-b border-slate-100 py-1.5 last:border-0"><span class="text-slate-600 font-bold text-xs flex items-center gap-1.5"><span class="text-sm">${icon}</span> ${label}</span><span class="font-mono text-xs text-slate-500 font-black">配置 ${d.t} 格</span></div>`;
             const isNoData = d.a < 0;
             const textCol = isNoData ? 'text-red-500' : (d.a <= 0 ? 'text-red-500' : 'text-green-600');
             return `<div class="flex justify-between items-center border-b border-slate-100 py-1.5 last:border-0"><span class="text-slate-600 font-bold text-xs flex items-center gap-1.5"><span class="text-sm">${icon}</span> ${label}</span><span class="font-mono text-xs"><span class="font-black ${textCol}">${isNoData ? '無即時' : d.a}</span> <span class="text-slate-400 font-medium">/ ${d.t}</span></span></div>`;
         };
-
+        
         marker.bindPopup(`
             <div class="p-3.5 min-w-[240px] bg-white">
                 <div class="flex justify-between items-start mb-1 pr-4">
@@ -469,11 +468,9 @@ function renderMapMarkers(data) {
 
 function renderList(data, isUsingDest) {
     const listEl = document.getElementById('content-list');
-    if (!listEl) return; 
-    
+    if (!listEl) return;
     if (!data.length) return listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold">範圍內查無停車場</div>`;
     listEl.innerHTML = "";
-
     data.forEach((item, index) => {
         const isFull = item.car.a === 0, hasNoData = item.car.a < 0;
         const colorClass = hasNoData ? 'bg-slate-400 text-white' : (isFull ? 'bg-red-500 text-white' : 'bg-emerald-500 text-white');
@@ -509,7 +506,7 @@ function renderList(data, isUsingDest) {
                     </div>
                     <div class="flex flex-col items-end gap-2.5 shrink-0">
                         <button onclick="toggleFav('${item.id}')" class="text-xl active:scale-75 transition">${isFav ? '🩷' : '🤍'}</button>
-                        <button onclick="startNavNavById('${item.id}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-black shadow-md active:scale-95 transition">導航</button>
+                        <button onclick="startNavById('${item.id}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-black shadow-md active:scale-95 transition">導航</button>
                     </div>
                 </div>
             </div>`;
@@ -527,10 +524,7 @@ function selectCard(id, lat, lng) {
     }
 }
 
-// ==========================================
-// 6. 即時路徑導航引擎
-// ==========================================
-function startNavNavById(id) {
+function startNavById(id) {
     const targetItem = parkingData.find(p => p.id === id);
     if (targetItem) startNav(targetItem);
 }
@@ -538,11 +532,11 @@ function startNavNavById(id) {
 function startNav(item) {
     if (!userLocation) return alert("等待 GPS 定位中，請確保已開啟定位權限！");
     initCompass(); 
-    isNavigating = true; currentDestination = item;
+    isNavigating = true;
+    currentDestination = item;
     
     const navHeader = document.getElementById('nav-header');
     if (navHeader) navHeader.classList.add('active');
-    
     if(window.innerWidth < 768) {
         if (searchPanel) searchPanel.style.transform = 'translateY(-100%)';
         if (bottomSheet) bottomSheet.style.transform = 'translateY(100%)';
@@ -552,8 +546,12 @@ function startNav(item) {
 
 function updateRoute() {
     if (!isNavigating || !userLocation || !currentDestination) return;
-    if (routingControl) map.removeControl(routingControl);
-
+    
+    if (routingControl) {
+        map.removeControl(routingControl);
+        routingControl = null;
+    }
+    
     routingControl = L.Routing.control({
         waypoints: [ L.latLng(userLocation[0], userLocation[1]), L.latLng(currentDestination.lat, currentDestination.lng) ],
         createMarker: function(i, waypoint, n) {
@@ -570,7 +568,8 @@ function updateRoute() {
             if (route.instructions.length > 1 && nextStep.distance < 10) nextStep = route.instructions[1];
             let arrow = "⬆️";
             const mod = nextStep.modifier ? nextStep.modifier.toLowerCase() : '';
-            if (mod.includes('right')) arrow = "➡️"; if (mod.includes('left')) arrow = "⬅️";
+            if (mod.includes('right')) arrow = "➡️";
+            if (mod.includes('left')) arrow = "⬅️";
             if (mod.includes('slight right')) arrow = "↗️"; if (mod.includes('slight left')) arrow = "↖️";
             if (mod.includes('u-turn')) arrow = "↩️"; if (nextStep.type === 'DestinationReached') arrow = "🏁";
             
@@ -581,46 +580,44 @@ function updateRoute() {
         }
         const navMetrics = document.getElementById('nav-metrics');
         if (navMetrics) navMetrics.innerText = `總剩餘 ${(route.summary.totalDistance / 1000).toFixed(1)} km | 約 ${Math.round(route.summary.totalTime / 60)} 分鐘抵達`;
-        
         const bounds = L.latLngBounds([userLocation, [currentDestination.lat, currentDestination.lng]]);
         map.fitBounds(bounds, { padding: [50, 50], animate: true });
-
         setTimeout(() => { if (isNavigating) map.setView(userLocation, 18, { animate: true, duration: 1.5 }); }, 3000);
     }).addTo(map);
 }
 
 function stopNavigation() {
-    isNavigating = false; currentDestination = null;
+    isNavigating = false; 
+    currentDestination = null;
+    
     const navHeader = document.getElementById('nav-header');
     if (navHeader) navHeader.classList.remove('active');
     
-    if(window.innerWidth < 768) {
+    if (window.innerWidth < 768) {
         if (searchPanel) searchPanel.style.transform = 'translateY(0)';
         if (bottomSheet) bottomSheet.style.transform = 'translateY(0)';
     }
-    if (routingControl) map.removeControl(routingControl);
+    
+    if (routingControl) {
+        map.removeControl(routingControl);
+        routingControl = null;
+    }
     
     if (searchedLocation) map.flyTo(searchedLocation, 15, { animate: true });
     else if (userLocation) map.flyTo(userLocation, 15, { animate: true }); 
 }
 
-// ==========================================
-// 7. 分頁切換與最愛面板管理
-// ==========================================
 function switchTab(tab) {
     currentTab = tab;
     const tabSearch = document.getElementById('tab-search');
     const tabFav = document.getElementById('tab-fav');
-    
     if (tabSearch) {
         tabSearch.classList.toggle('text-blue-600', tab === 'search');
         tabSearch.classList.toggle('border-blue-600', tab === 'search');
-        tabSearch.classList.toggle('border-transparent', tab !== 'search');
     }
     if (tabFav) {
         tabFav.classList.toggle('text-blue-600', tab === 'fav');
         tabFav.classList.toggle('border-blue-600', tab === 'fav');
-        tabFav.classList.toggle('border-transparent', tab !== 'fav');
     }
     handleFilter();
 }
@@ -631,16 +628,12 @@ function toggleFav(id) {
     handleFilter();
 }
 
-// ==========================================
-// 8. 🚀 智慧聯想選單 (仿 Google 體驗 + 🛑 台北限定過濾網)
-// ==========================================
 initCompass();
 initGPS();
 fetchTaipeiParkingData();
 
 const searchInput = document.getElementById('searchInput');
 let autocompleteList = document.getElementById('autocomplete-list');
-
 if (!autocompleteList && searchInput) {
     searchInput.parentElement.classList.add('relative');
     autocompleteList = document.createElement('div');
@@ -650,112 +643,64 @@ if (!autocompleteList && searchInput) {
 }
 
 if (searchInput && autocompleteList) {
-    let debounceTimer;
     searchInput.addEventListener('input', function() {
-        clearTimeout(debounceTimer);
         const query = this.value.trim();
         autocompleteList.innerHTML = '';
         if (!query) { autocompleteList.classList.add('hidden'); return; }
 
-        debounceTimer = setTimeout(async () => {
-            try {
-                // 優先使用「臺北市」前綴請求開源地圖伺服器，並開啟詳細地理欄位
-                const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent('臺北市 ' + query)}&countrycodes=tw&addressdetails=1&limit=10`;
-                const res = await fetch(url);
-                const suggestions = await res.json();
-
-                if (suggestions.length > 0) {
-                    let hasVisibleItems = false;
-                    autocompleteList.innerHTML = '';
-                    
-                    // 頂部常駐快速選項
-                    const searchAllDiv = document.createElement('div');
-                    searchAllDiv.className = 'p-3 hover:bg-blue-50 cursor-pointer border-b border-slate-100 flex items-center gap-3 transition';
-                    searchAllDiv.innerHTML = `
-                        <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold flex-shrink-0">🔍</div>
-                        <div class="text-sm text-slate-800 font-bold flex-1">搜尋「${query}」台北周邊車位</div>
-                    `;
-                    searchAllDiv.addEventListener('click', () => { autocompleteList.classList.add('hidden'); searchLocation(); });
-                    autocompleteList.appendChild(searchAllDiv);
-
-                    suggestions.forEach(place => {
-                        const addr = place.address || {};
-                        const city = addr.city || addr.county || '';
-                        const displayName = place.display_name || '';
-
-                        // 🛑 防火牆過濾：只要不符合台北地區的任何關鍵字，一律就地蒸發！
-                        if (!city.includes('台北') && !city.includes('臺北') && !displayName.includes('台北') && !displayName.includes('臺北')) {
-                            return; 
-                        }
-
-                        // 有台北市資料，開放渲染
-                        hasVisibleItems = true;
-                        const shortName = place.name || displayName.split(',')[0];
-                        
-                        const district = addr.suburb || addr.town || addr.village || '';
-                        const road = addr.road || '';
-                        const housenumber = addr.house_number || '';
-                        
-                        let detailAddress = `${city}${district}${road}${housenumber}`;
-                        if (!detailAddress || detailAddress.length < 3) {
-                            detailAddress = displayName.split(',').reverse().join('').trim();
-                        }
-
-                        const div = document.createElement('div');
-                        div.className = 'p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0 flex items-center gap-3 transition';
-                        div.innerHTML = `
-                            <div class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-bold flex-shrink-0">📍</div>
-                            <div class="flex flex-col overflow-hidden flex-1">
-                                <div class="text-sm text-slate-800 font-bold truncate">${shortName}</div>
-                                <div class="text-[11px] text-slate-400 truncate">${detailAddress}</div>
-                            </div>
-                        `;
-                        
-                        div.addEventListener('click', () => {
-                            searchInput.value = shortName; 
-                            autocompleteList.classList.add('hidden'); 
-                            searchedLocation = [parseFloat(place.lat), parseFloat(place.lon)];
-                            window.currentKeyword = null; 
-                            
-                            createSearchMarker(shortName, searchedLocation[0], searchedLocation[1], detailAddress);
-                            handleFilter(); 
-                            map.flyTo(searchedLocation, 16, {animate: true, duration: 1.5}); 
-                            collapseBottomSheet();
-                        });
-                        autocompleteList.appendChild(div);
-                    });
-
-                    if (hasVisibleItems) {
-                        autocompleteList.classList.remove('hidden');
-                    } else {
-                        renderNoResults();
-                    }
-                } else {
-                    renderNoResults();
+        const matches = [];
+        const seenDestNames = new Set();
+        for (const p of parkingData) {
+            if (smartMatch(p.name, query) || smartMatch(p.destName, query) || smartMatch(p.address, query)) {
+                if (!seenDestNames.has(p.destName)) {
+                    seenDestNames.add(p.destName); matches.push(p);
+                    if (matches.length >= 8) break;
                 }
-            } catch (e) { console.error("聯想選單錯誤:", e); }
-        }, 400);
-    });
+            }
+        }
 
-    function renderNoResults() {
-        autocompleteList.innerHTML = `<div class="p-4 text-center text-sm text-slate-400 font-bold">在台北地區找不到「${searchInput.value.trim()}」😢<br><span class="text-xs font-normal">請輸入台北市內更具體的店家或地址</span></div>`;
-        autocompleteList.classList.remove('hidden');
-    }
+        if (matches.length > 0) {
+            autocompleteList.classList.remove('hidden');
+            const searchAllDiv = document.createElement('div');
+            searchAllDiv.className = 'p-3 hover:bg-blue-50 cursor-pointer border-b border-slate-100 flex items-center gap-3 transition';
+            searchAllDiv.innerHTML = `
+                <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold flex-shrink-0">🔍</div>
+                <div class="text-sm text-slate-800 font-bold flex-1">「${query}」查看所有地點</div>
+            `;
+            searchAllDiv.addEventListener('click', () => { autocompleteList.classList.add('hidden'); searchLocation(); });
+            autocompleteList.appendChild(searchAllDiv);
 
-    document.addEventListener('click', function(e) {
-        if (!searchInput.contains(e.target) && !autocompleteList.contains(e.target)) {
+            matches.forEach(match => {
+                const div = document.createElement('div');
+                div.className = 'p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0 flex items-center gap-3 transition';
+                div.innerHTML = `
+                    <div class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-bold flex-shrink-0">📍</div>
+                    <div class="flex flex-col overflow-hidden">
+                        <div class="text-sm text-slate-800 font-bold truncate">${match.destName}</div>
+                        <div class="text-[11px] text-slate-500 truncate">${match.address}</div>
+                    </div>
+                `;
+                div.addEventListener('click', () => {
+                    searchInput.value = match.destName; autocompleteList.classList.add('hidden'); 
+                    searchedLocation = [match.lat, match.lng]; window.currentKeyword = null;
+                    createSearchMarker(match.destName, match.lat, match.lng, match.address);
+                    handleFilter(); collapseBottomSheet();
+                });
+                autocompleteList.appendChild(div);
+            });
+        } else {
             autocompleteList.classList.add('hidden');
         }
     });
+    document.addEventListener('click', function(e) {
+        if (!searchInput.contains(e.target) && !autocompleteList.contains(e.target)) autocompleteList.classList.add('hidden');
+    });
 }
 
-// ==========================================
-// 9. 建立搜尋地標與綠色文字膠囊常駐標籤
-// ==========================================
+// 📍 常駐顯示綠色文字標籤
 function createSearchMarker(name, lat, lng, address = "") {
-    let currentMap = typeof map !== 'undefined' ? map : myMap;
+    let currentMap = map;
     if (!currentMap) return;
-
     if (destMarker) currentMap.removeLayer(destMarker);
 
     const customIcon = L.divIcon({
@@ -764,33 +709,20 @@ function createSearchMarker(name, lat, lng, address = "") {
         iconSize: [40, 40],
         iconAnchor: [20, 40]
     });
-
-    destMarker = L.marker([lat, lng], { icon: customIcon }).addTo(currentMap);
-
-    // 🌟 常駐顯示綠色地名標籤膠囊 (圖六效果)
-    destMarker.bindTooltip(name, {
-        permanent: true,
-        direction: 'top',
-        className: 'custom-map-label',
-        offset: L.point(0, -35)
-    });
-
-    const searchQuery = address ? `${name} ${address}` : name;
-    const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(searchQuery)}`;
-
-    const popupContent = `
-        <div style="padding: 10px; font-family: sans-serif; min-w-[180px]; text-align: left;">
-            <h4 style="margin: 0 0 4px 0; font-size: 14px; color: #1e293b; font-weight: bold;">🔍 ${name}</h4>
-            ${address ? `<p style="margin: 0 0 8px 0; font-size: 11px; color: #64748b;">${address}</p>` : ''}
-            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #f1f5f9;">
-                <a href="${googleMapsUrl}" target="_blank" 
-                   style="display: block; background-color: #2563eb; color: #ffffff; text-align: center; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: bold; text-decoration: none;">
-                    開啟 Google 地圖 ↗
-                </a>
-            </div>
-        </div>
-    `;
     
+    destMarker = L.marker([lat, lng], { icon: customIcon }).addTo(currentMap);
+    destMarker.bindTooltip(name, { permanent: true, direction: 'top', className: 'custom-map-label', offset: L.point(0, -35) });
+
+    const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address ? `${name} ${address}` : name)}`;
+    const popupContent = `
+        <div style="padding: 10px; font-family: sans-serif; min-width: 180px; text-align: left;">
+            <h4 style="margin: 0 0 4px 0; font-size: 14px; color: #1e293b; font-weight: bold;">🔍 ${name}</h4>
+            ${address ? `<p style="margin: 0 0 8px 0; font-size: 12px; color: #64748b; max-width: 220px; word-break: break-all;">${address}</p>` : ''}
+            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #f1f5f9;">
+                <a href="${googleMapsUrl}" target="_blank" style="display: block; background-color: #2563eb; color: #ffffff; text-align: center; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: bold; text-decoration: none;">開啟 Google 地圖 ↗</a>
+            </div>
+        </div>`;
+
     destMarker.bindPopup(popupContent, { closeButton: true, offset: L.point(0, -30) });
-    currentMap.panTo([lat, lng]);
+    currentMap.flyTo([lat, lng], 16, { animate: true, duration: 1.5 });
 }
