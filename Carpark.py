@@ -14,10 +14,10 @@ from flask_cors import CORS
 from pyproj import Transformer
 from apscheduler.schedulers.background import BackgroundScheduler
 
-# ⚙️ 初始化 Flask，並將靜態檔案資料夾直接指定為 'car'
+# ⚙️ 初始化 Flask
 app = Flask(__name__, static_folder='car', static_url_path='/')
 
-# 🎯 強制開大門：允許任何來源 (*)、任何 Methods、任何 Headers，徹底消滅 CORS policy 錯誤！
+# 🎯 解放 CORS：允許前端跨網域索取資料
 CORS(app, resources={
     r"/*": {
         "origins": "*",
@@ -40,15 +40,11 @@ DB_CONFIG = {
 
 URL_DESC = "https://tcgbusfs.blob.core.windows.net/blobtcmsv/TCMSV_alldesc.json"
 URL_AVAIL = "https://tcgbusfs.blob.core.windows.net/blobtcmsv/TCMSV_allavailable.json"
-YB_TP_URL = "https://tcgbusfs.blob.core.windows.net/blobyoubike/YouBikeTP.json"
 TRANSFORMER = Transformer.from_crs("EPSG:3826", "EPSG:4326", always_xy=True)
 
 METRO_STATIONS = []
 METRO_LINES = {}
 
-# =========================================================
-# 🗄️ 資料庫核心函數
-# =========================================================
 def get_db_connection():
     return mysql.connector.connect(**DB_CONFIG)
 
@@ -77,6 +73,31 @@ def init_db():
         print("[INFO] Aiven 資料表已準備就緒")
     except Exception as e:
         print(f"[ERROR] 資料庫初始化失敗: {e}")
+
+def safe_num(v): return None if pd.isna(v) else int(v)
+
+def extract_structure_type(row):
+    text = f"{row.get('name','')} {row.get('address','')}"
+    if "地下" in text: return "地下"
+    if "立體" in text: return "立體"
+    return "平面"
+
+def categorize_parking(name: str) -> str:
+    if not name: return '一般停車場'
+    if any(k in name for k in ['醫院', '榮總', '三總', '馬偕', '長庚', '醫學院']): return '🏥 醫療院所'
+    if any(k in name for k in ['家樂福', '大潤發', '好市多', 'IKEA', '全聯']): return '🛒 大型賣場'
+    if any(k in name for k in ['百貨', '遠東', '新光', '微風', 'SOGO', '京站', '誠品']): return '🛍️ 百貨商場'
+    if any(k in name for k in ['嘟嘟房', '台灣聯通', '應安', '車亭', '日月亭']): return '🅿️ 連鎖集團'
+    return '一般停車場'
+
+def load_metro_data():
+    global METRO_STATIONS, METRO_LINES
+    try:
+        with open("metro_stations.json", "r", encoding="utf-8") as f:
+            METRO_STATIONS = json.load(f)
+        with open("metro_lines.json", "r", encoding="utf-8") as f:
+            METRO_LINES = json.load(f)
+    except: pass
 
 def sync_data_to_db():
     print("[INFO] 開始同步最新資料至雲端資料庫...")
@@ -118,66 +139,45 @@ def sync_data_to_db():
     except Exception as e:
         print(f"[ERROR] 資料同步失敗: {e}")
 
-# =========================================================
-# 🧠 核心計算與工具
-# =========================================================
-def haversine_m(lat1, lng1, lat2, lng2):
-    R = 6371000
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dphi, dlambda = math.radians(lat2 - lat1), math.radians(lng2 - lng1)
-    a = math.sin(dphi / 2)**2 + math.cos(p1) * math.cos(p2) * math.sin(dlambda / 2)**2
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-def walk_time_min(dist_m): return round(dist_m / 80) if dist_m else None
-def safe_num(v): return None if pd.isna(v) else int(v)
-
-def extract_structure_type(row):
-    text = f"{row.get('name','')} {row.get('address','')}"
-    if "地下" in text: return "地下"
-    if "立體" in text: return "立體"
-    return "平面"
-
-def categorize_parking(name: str) -> str:
-    if not name: return '一般停車場'
-    if any(k in name for k in ['醫院', '榮總', '三總', '馬偕', '長庚', '醫學院']): return '🏥 醫療院所'
-    if any(k in name for k in ['家樂福', '大潤發', '好市多', 'IKEA', '全聯']): return '🛒 大型賣場'
-    if any(k in name for k in ['百貨', '遠東', '新光', '微風', 'SOGO', '京站', '誠品']): return '🛍️ 百貨商場'
-    if any(k in name for k in ['嘟嘟房', '台灣聯通', '應安', '車亭', '日月亭']): return '🅿️ 連鎖集團'
-    return '一般停車場'
-
-def load_metro_data():
-    global METRO_STATIONS, METRO_LINES
-    try:
-        with open("metro_stations.json", "r", encoding="utf-8") as f:
-            METRO_STATIONS = json.load(f)
-        with open("metro_lines.json", "r", encoding="utf-8") as f:
-            METRO_LINES = json.load(f)
-    except: pass
-
-# =========================================================
-# 🌐 網頁路由與 API 供應區塊
-# =========================================================
 @app.route("/")
 def serve_index():
     return app.send_static_file('index.html')
 
+# =========================================================
+# 🚀 核心更動：將 /nearby 從「測試訊息」改為「從資料庫撈取真實資料」
+# =========================================================
 @app.route("/nearby")
 def nearby():
-    return jsonify({"message": "後端真實連線中", "status": "active"})
-
-# 🌟【重要新增】前端專用即時車位 API 路由 (直接吐出雲端資料庫資料)
-@app.route("/api/parking")
-def get_parking_data():
     try:
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(dictionary=True) # 以字典格式返回，方便轉換為 JSON
         cursor.execute("SELECT * FROM parking_lots")
         rows = cursor.fetchall()
         cursor.close()
         conn.close()
-        return jsonify({"status": "success", "data": rows})
+        
+        formatted_data = []
+        for row in rows:
+            # 將資料庫的蛇形命名 (total_car) 轉換為前端期待的命名 (totalcar)
+            formatted_data.append({
+                "id": row["id"],
+                "name": row["name"],
+                "category": row["category"],
+                "address": row["address"],
+                "lat": float(row["lat"]) if row["lat"] else 0,
+                "lng": float(row["lng"]) if row["lng"] else 0,
+                "availablecar": row["available_car"],
+                "totalcar": row["total_car"],
+                "payex": row["payex"],
+                "structureType": row["structure_type"]
+            })
+
+        return jsonify({
+            "message": "success",
+            "nearby": formatted_data
+        })
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     init_db()          
