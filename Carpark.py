@@ -14,16 +14,26 @@ from flask_cors import CORS
 from pyproj import Transformer
 from apscheduler.schedulers.background import BackgroundScheduler
 
-# ⚙️ 初始化 Flask，並將靜態檔案資料夾直接指定為 'car'
+# =========================================================
+# ⚙️ 初始化 Flask 伺服器與全面解除 CORS 限制 (徹底消滅 F12 跨網域阻擋紅字)
+# =========================================================
 app = Flask(__name__, static_folder='car', static_url_path='/')
-CORS(app)
+
+# 🎯 強制開大門：允許任何來源 (*)、任何 Methods、任何 Headers，徹底消滅 CORS policy 錯誤！
+CORS(app, resources={
+    r"/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": "*"
+    }
+})
 
 # =========================================================
 # ☁️ Aiven 資料庫連線設定
 # =========================================================
 DB_CONFIG = {
     'user': 'avnadmin',
-    # 🔥 密碼改成從「環境變數」讀取，不再寫死在程式碼裡！
+    # 🔥 密碼從雲端環境變數讀取，確保專案資安
     'password': os.environ.get('DB_PASSWORD'), 
     'host': 'mysql-14bf0d58-iljsauw-7901.c.aivencloud.com',
     'port': 11576,
@@ -112,7 +122,7 @@ def sync_data_to_db():
         print(f"[ERROR] 資料同步失敗: {e}")
 
 # =========================================================
-# 🧠 核心計算與工具
+# 🧠 核心地理與費率計算工具
 # =========================================================
 def haversine_m(lat1, lng1, lat2, lng2):
     R = 6371000
@@ -148,15 +158,14 @@ def load_metro_data():
     except: pass
 
 # =========================================================
-# 🌐 網頁路由區塊 (讓 Flask 自動導向 car 資料夾)
+# 🌐 網頁路由區塊 (讓 Flask 自動導向 car 資料夾內的 index.html)
 # =========================================================
 @app.route("/")
 def serve_index():
-    # 當瀏覽器開啟 127.0.0.1:5000 時，直接讀取 car 資料夾內的 index.html
     return app.send_static_file('index.html')
 
 # =========================================================
-# 🚀 API 端點：精準計算並撈取周邊車位資料
+# 🚀 API 端點：精準計算並撈取周邊車位資料 (裝回系統大腦)
 # =========================================================
 @app.route("/nearby")
 def nearby():
@@ -168,7 +177,7 @@ def nearby():
         return jsonify({"error": "缺少經緯度參數 lat/lng"}), 400
 
     try:
-        # 1. 連線到 Aiven 雲端資料庫
+        # 1. 連線到 Aiven 雲端資料庫抓取車位
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
         cursor.execute("SELECT * FROM parking_lots")
@@ -185,9 +194,9 @@ def nearby():
             d = haversine_m(lat, lng, float(r["lat"]), float(r["lng"]))
             walk_min = walk_time_min(d)
             
-            # 3. 專題防錯：搜尋半徑設為 15000 公尺（15公里），防止跨區測試查無資料
+            # 3. 專題防錯：搜尋半徑設為 15000 公尺（15公里），防止地圖大跨區跨行政區測試時查無資料
             if d <= 15000 and (walk_min is None or walk_min <= max_walk):
-                # 簡單正則解析費率
+                # 正則表達式自動解析費率文字
                 import re
                 text = str(r["payex"] or "").replace(" ", "").replace(",", "")
                 m = re.search(r"(\d+)元", text)
@@ -195,7 +204,7 @@ def nearby():
                 if price and ("半小時" in text or "30分" in text or "30分鐘" in text):
                     price = price * 2
                 
-                # 即時動態客滿預測
+                # AI 即時動態客滿時間預測
                 def quick_predict(avail, total):
                     if avail is None or total is None: return "無即時連線，無法預測"
                     if avail <= 0: return "已客滿"
@@ -218,7 +227,7 @@ def nearby():
                     "prediction": quick_predict(r["available_car"], r["total_car"])
                 })
 
-        # 4. 進行高精度距離排序（由近到遠）
+        # 4. 進行高精度距離排序洗牌（由近到遠）
         res.sort(key=lambda x: x["distance_m"])
         nearest = res[0] if res else None
 
@@ -228,7 +237,7 @@ def nearby():
             priced.sort(key=lambda x: (x["pricePerHour"], x["distance_m"]))
             cheapest = priced[0]
 
-        # 5. 回傳符合前端 script.js 規格的完整 JSON 資料包
+        # 5. 回傳符合前端高度期待的真實 JSON 資料包格式
         return jsonify({
             "nearby": res[:60],
             "nearest": nearest,
@@ -247,14 +256,14 @@ if __name__ == "__main__":
     load_metro_data()  
     sync_data_to_db()  
     
-    # 背景自動同步排程 (每 3 分鐘)
+    # 背景自動同步排程 (每 3 分鐘從市府 Blob 資料清洗一次)
     scheduler = BackgroundScheduler(daemon=True)
     scheduler.add_job(func=sync_data_to_db, trigger='interval', minutes=3)
     scheduler.start()
     print("[INFO] ⏱️ 背景自動更新排程已啟動 (每 3 分鐘)")
 
     try:
-        # 執行本地伺服器
+        # 執行伺服器
         app.run(port=5000, debug=False) 
     except (KeyboardInterrupt, SystemExit):
         scheduler.shutdown()
