@@ -5,3 +5,4 @@ pandas
 mysql-connector-python
 pyproj
 APScheduler
+gunicorn
