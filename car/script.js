@@ -6,7 +6,7 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r
 const markerCluster = L.markerClusterGroup({ chunkedLoading: true, disableClusteringAtZoom: 16, maxClusterRadius: 60 });
 map.addLayer(markerCluster);
 
-let parkingData = [], userLocation = null, previousLocation = null, currentHeading = 0;
+let parkingData = [], userLocation = null, previousLocation = null, currentHeading = 0, hasCompass = false;
 let userMarker = null, searchedLocation = null, destMarker = null, radiusCircle = null;
 let routingControl = null, isNavigating = false, currentDestination = null, currentTab = 'search';
 let favorites = JSON.parse(localStorage.getItem('p_favs')) || [];
@@ -84,6 +84,45 @@ map.on('dragend', () => {
         if (bottomSheet) bottomSheet.style.transform = 'translateY(0)';
     }
 });
+
+// 更新車輛圖示的旋轉角度
+function updateCarIcon() {
+    if (userMarker) {
+        const carIconHtml = `<div class="car-marker-container" style="transform: rotate(${currentHeading}deg);"><div class="car-marker">🚘</div></div>`;
+        userMarker.setIcon(L.divIcon({ html: carIconHtml, className: '' }));
+    }
+}
+
+// 處理手機感測器回傳的角度資料 (指北針)
+function handleOrientation(event) {
+    let heading = null;
+    if (event.webkitCompassHeading !== undefined && event.webkitCompassHeading !== null) {
+        heading = event.webkitCompassHeading;
+    } else if (event.alpha !== null) {
+        heading = 360 - event.alpha;
+    }
+    if (heading !== null) {
+        hasCompass = true; 
+        currentHeading = heading;
+        updateCarIcon(); 
+    }
+}
+
+// 啟動指南針與請求授權
+function initCompass() {
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission()
+            .then(permissionState => {
+                if (permissionState === 'granted') {
+                    window.addEventListener('deviceorientation', handleOrientation);
+                }
+            })
+            .catch(console.error);
+    } else {
+        window.addEventListener('deviceorientationabsolute', handleOrientation);
+        window.addEventListener('deviceorientation', handleOrientation);
+    }
+}
 
 function smartMatch(targetStr, queryStr) {
     if (!targetStr || !queryStr) return false;
@@ -211,13 +250,23 @@ function initGPS() {
             const { latitude, longitude, heading } = pos.coords;
             const isFirst = !userLocation;
             userLocation = [latitude, longitude];
-            if (heading !== null && !isNaN(heading)) currentHeading = heading; 
-            else if (previousLocation) currentHeading = getBearing(previousLocation[0], previousLocation[1], latitude, longitude);
+            
+            if (!hasCompass) {
+                if (heading !== null && !isNaN(heading)) {
+                    currentHeading = heading; 
+                } else if (previousLocation) {
+                    currentHeading = getBearing(previousLocation[0], previousLocation[1], latitude, longitude);
+                }
+            }
             previousLocation = [latitude, longitude];
 
-            const carIconHtml = `<div class="car-marker-container" style="transform: rotate(${currentHeading}deg);"><div class="car-marker">🚘</div></div>`;
-            if (!userMarker) userMarker = L.marker(userLocation, { icon: L.divIcon({ html: carIconHtml, className: '' }), zIndexOffset: 1000 }).addTo(map);
-            else { userMarker.setLatLng(userLocation); userMarker.setIcon(L.divIcon({ html: carIconHtml, className: '' })); }
+            if (!userMarker) {
+                const carIconHtml = `<div class="car-marker-container" style="transform: rotate(${currentHeading}deg);"><div class="car-marker">🚘</div></div>`;
+                userMarker = L.marker(userLocation, { icon: L.divIcon({ html: carIconHtml, className: '' }), zIndexOffset: 1000 }).addTo(map);
+            } else { 
+                userMarker.setLatLng(userLocation); 
+                updateCarIcon(); 
+            }
 
             const gpsDot = document.getElementById('gps-dot');
             if (gpsDot) gpsDot.className = "w-2 h-2 bg-green-500 rounded-full shadow-[0_0_8px_#22c55e]";
@@ -234,15 +283,23 @@ function initGPS() {
     );
 }
 
+// 🔥 核心升級：支援小吃店、飯店、酒店、超商的智慧搜尋引擎
 async function searchLocation() {
     const query = document.getElementById('searchInput') ? document.getElementById('searchInput').value.trim() : "";
     if (!query) return clearSearchAndLocate();
     
     collapseBottomSheet();
 
-    const localMatches = parkingData.filter(p => 
-        smartMatch(p.name, query) || smartMatch(p.destName, query) || smartMatch(p.address, query) || smartMatch(p.category, query)
-    );
+    // 💡 判斷是否為「生活機能地標詞」（小吃、超商、飯店、酒店、餐廳、7-11等）
+    // 如果是這類词，我們直接跳過本地名稱過濾，強迫走地圖搜尋定位，才能拉出它周圍的停車場！
+    const isLifeKeyword = /(小吃|超商|飯店|酒店|便利商店|餐廳|咖啡|美食|7-11|全家|萊爾富|OK|夜市)/i.test(query);
+
+    let localMatches = [];
+    if (!isLifeKeyword) {
+        localMatches = parkingData.filter(p => 
+            smartMatch(p.name, query) || smartMatch(p.destName, query) || smartMatch(p.address, query) || smartMatch(p.category, query)
+        );
+    }
 
     const listEl = document.getElementById('content-list');
     if (localMatches.length > 0) {
@@ -256,23 +313,41 @@ async function searchLocation() {
         return; 
     }
 
+    // 🌐 啟動全球地理地標搜尋（強勢支援非停車場名字的生活商店）
     window.currentKeyword = null; 
-    if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">🌍 尋找地標中...</div>`;
+    if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">🌍 正在台北市精準搜尋「${query}」...</div>`;
     
     try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=tw&limit=1`);
+        // 🚀 智慧防錯：如果使用者搜尋沒打「台北」，自動加上「臺北市」前綴，精準鎖定行政區範圍！
+        let searchQuery = query;
+        if (!searchQuery.includes('台北') && !searchQuery.includes('臺北')) {
+            searchQuery = '臺北市 ' + searchQuery;
+        }
+
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&countrycodes=tw&limit=1`);
         const data = await res.json();
         if (data.length > 0) {
             searchedLocation = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
             if (destMarker) map.removeLayer(destMarker);
-            destMarker = L.marker(searchedLocation, {
-                icon: L.divIcon({ html: `<div class="target-marker-container"><div class="target-marker">📍</div></div>`, className: 'custom-div-icon', iconAnchor: [20, 40] }),
-                zIndexOffset: 2000
-            }).addTo(map);
-            map.setView(searchedLocation, 15);
+            
+            // 在該小吃店/飯店上方釘上紅色大頭針 📍 並在上方顯示常駐名稱
+        destMarker = L.marker(searchedLocation, {
+    icon: L.divIcon({ html: `<div class="target-marker-container"><div class="target-marker">📍</div></div>`, className: 'custom-div-icon', iconAnchor: [20, 40] }),
+    zIndexOffset: 2000
+    }).addTo(map).bindTooltip(query, {
+    permanent: true,       // 👈 設定為 true，讓文字名稱一直顯示，不用點擊
+    direction: 'top',      // 👈 顯示在 📍 圖標的正上方
+    className: 'custom-map-label', // 👈 套用你 style.css 裡寫好的漂亮綠色膠囊標籤樣式
+    offset: L.point(0, -35) // 👈 微調文字位置，使其完美浮在 📍 正上方不壓到圖標
+    });
+
+            // ⚡ 核心交接：handleFilter 會自動切換 refLocation 為這個商家座標
+            // 並重新把全台北市的車位「由近到遠」洗牌排序！
             handleFilter(); 
+            map.flyTo(searchedLocation, 16, {animate: true, duration: 1.5}); 
+            collapseBottomSheet();
         } else {
-            if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">找不到此地點</div>`;
+            if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">在台北市找不到「${query}」<br><span class="text-xs text-slate-400">請輸入更具體的名字（如：台北喜來登大飯店、7-11林森門市）</span></div>`;
         }
     } catch (err) { 
         if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500">搜尋失敗</div>`; 
@@ -280,6 +355,7 @@ async function searchLocation() {
 }
 
 function clearSearchAndLocate() {
+    initCompass(); 
     const searchInput = document.getElementById('searchInput');
     if (searchInput) searchInput.value = "";
     searchedLocation = null;
@@ -296,7 +372,6 @@ function handleFilter() {
     
     let data = (currentTab === 'search') ? [...parkingData] : parkingData.filter(p => favorites.includes(p.id));
     
-    // 【防錯】若 HTML 沒有選單，預設拉出全部範圍
     const radiusSelect = document.getElementById('radiusSelect');
     const radiusMeters = radiusSelect ? parseFloat(radiusSelect.value) : 99999;
     const refLocation = searchedLocation || userLocation;
@@ -336,11 +411,10 @@ function renderMapMarkers(data) {
         const color = item.car.a < 0 ? '#94a3b8' : (isFull ? '#ef4444' : (item.car.a <= 10 ? '#f59e0b' : '#10b981'));
         const displayNum = item.car.a < 0 ? '?' : item.car.a;
 
-        // 💡 【完美修復】根據數字長度，動態計算外部容器寬度，防止數字跑出圓圈外
         const textStr = String(displayNum);
-        let iconWidth = 24;       // 單一字元維持完美正圓
-        if (textStr.length === 2) iconWidth = 30; // 兩位數小幅加寬
-        if (textStr.length >= 3) iconWidth = 38;  // 三位數自動延伸成精美膠囊形
+        let iconWidth = 24;       
+        if (textStr.length === 2) iconWidth = 30; 
+        if (textStr.length >= 3) iconWidth = 38;  
         
         const iconHeight = 24;
 
@@ -473,6 +547,7 @@ function startNavById(id) {
 
 function startNav(item) {
     if (!userLocation) return alert("等待 GPS 定位中，請確保已開啟定位權限！");
+    initCompass(); 
     isNavigating = true; currentDestination = item;
     
     const navHeader = document.getElementById('nav-header');
@@ -563,6 +638,7 @@ function toggleFav(id) {
     handleFilter();
 }
 
+initCompass();
 initGPS();
 fetchTaipeiParkingData();
 
@@ -617,6 +693,7 @@ if (searchInput && autocompleteList) {
                         <div class="text-[11px] text-slate-500 truncate">${match.address}</div>
                     </div>
                 `;
+                
                 div.addEventListener('click', () => {
                     searchInput.value = match.destName; 
                     autocompleteList.classList.add('hidden'); 
@@ -645,4 +722,72 @@ if (searchInput && autocompleteList) {
             autocompleteList.classList.add('hidden');
         }
     });
+}
+
+// =========================================================================
+// 📍 獨立擴充功能：建立搜尋結果標籤，並在圖標旁常駐顯示地點名字（對應圖六效果）
+// =========================================================================
+/**
+ * @param {string} name - 使用者搜尋的地點/停車場名稱 (例如: 家樂福內湖店)
+ * @param {number} lat - 緯度
+ * @param {number} lng - 經度
+ * @param {string} address - 地點的完整地址 (選填)
+ */
+function createSearchMarker(name, lat, lng, address = "") {
+    // 1. 自動檢查你原本初始化 Leaflet 地圖時的變數名稱（相容 map 或 myMap）
+    let currentMap = null;
+    if (typeof map !== 'undefined') { currentMap = map; } 
+    else if (typeof myMap !== 'undefined') { currentMap = myMap; }
+    
+    if (!currentMap) {
+        console.error("找不到全域地圖物件，請確認你原本初始化 Leaflet 的變數名稱是否為 map 或 myMap！");
+        return;
+    }
+
+    // 2. 建立自訂的粉紅色大頭針 HTML（對應你原本畫面的 icon 樣式）
+    const customIcon = L.divIcon({
+        className: 'custom-div-icon',
+        html: `<div class="target-marker-container">
+                    <span class="target-marker">📍</span>
+               </div>`,
+        iconSize: [40, 40],
+        iconAnchor: [20, 40]
+    });
+
+    // 3. 建立標籤並直接加到地圖上
+    const marker = L.marker([lat, lng], { icon: customIcon }).addTo(currentMap);
+
+    // 4. 🌟 關鍵核心：綁定常駐文字標籤 (Tooltip)，達成圖六綠色文字標籤的效果
+    marker.bindTooltip(name, {
+        permanent: true,       // 👈 設定為 true，文字就會一直顯示，不需要點擊！
+        direction: 'right',    // 👈 顯示在圖標的右側（也可以改成 'top' 顯示在上方）
+        className: 'custom-map-label', // 👈 自訂 CSS 類別名稱，用來美化文字外觀
+        offset: L.point(10, -20)       // 👈 微調文字標籤的位置，避免壓到大頭針
+    });
+
+    // 5. 產生 Google 地圖官方搜尋跳轉網址（保留你之前想要的功能，點擊圖標依然可以開彈窗跳轉）
+    const searchQuery = address ? `${name} ${address}` : name;
+    const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(searchQuery)}`;
+
+    const popupContent = `
+        <div style="padding: 10px; font-family: sans-serif; min-w-[180px]; text-align: left;">
+            <h4 style="margin: 0 0 4px 0; font-size: 14px; color: #1e293b; font-weight: bold;">🔍 ${name}</h4>
+            ${address ? `<p style="margin: 0 0 8px 0; font-size: 12px; color: #64748b;">${address}</p>` : ''}
+            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #f1f5f9;">
+                <a href="${googleMapsUrl}" target="_blank" 
+                   style="display: block; background-color: #2563eb; color: #ffffff; text-align: center; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: bold; text-decoration: none;">
+                   開啟 Google 地圖 ↗
+                </a>
+            </div>
+        </div>
+    `;
+    
+    // 點擊 📍 圖標時，依然會跳出可以去 Google 地圖的氣泡窗
+    marker.bindPopup(popupContent, {
+        closeButton: true,
+        offset: L.point(0, -30)
+    });
+
+    // 讓地圖視野自動平滑移到這一點上
+    currentMap.panTo([lat, lng]);
 }

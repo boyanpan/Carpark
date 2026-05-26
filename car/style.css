@@ -41,3 +41,89 @@ html, body { height: 100vh; width: 100vw; margin: 0; padding: 0; }
     }
     body { touch-action: auto; }
 }
+
+/* 🌟 新增：收藏系統專用小星星樣式 */
+.fav-star {
+    font-size: 18px;
+    cursor: pointer;
+    transition: transform 0.2s, color 0.2s;
+}
+.fav-star:active {
+    transform: scale(1.3);
+}
+.fav-star.active {
+    color: #eab308; /* 金黃色 */
+}
+.fav-star.inactive {
+    color: #cbd5e1; /* 灰色 */
+}
+
+/* 🌟 自訂地圖常駐店名標籤樣式（完美重現圖六效果） */
+.custom-map-label {
+    background-color: #ffffff !important;   /* 標籤背景顏色 (純白) */
+    color: #10b981 !important;              /* 標籤文字顏色 (綠色，對應圖六) */
+    border: 2px solid #10b981 !important;    /* 標籤邊框 (2px 綠色實線) */
+    border-radius: 20px !important;         /* 圓角效果 (讓它看起來像膠囊形狀) */
+    padding: 4px 10px !important;           /* 內襯邊距 (上下4px，左右10px) */
+    font-size: 13px !important;             /* 文字大小 */
+    font-weight: bold !important;           /* 文字加粗 */
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15) !important; /* 陰影效果，增加立體感 */
+    white-space: nowrap !important;         /* 確保店名一行寫完不換行 */
+}
+
+/* 標籤旁邊的小箭頭美化（指向大頭針的小三角形） */
+.custom-map-label::before {
+    border-right-color: #10b981 !important; /* 讓小箭頭的顏色也跟著變成綠色 */
+}
+
+/* 搜尋結果粉紅大頭針的掉落特效（若原本已有可不貼） */
+.target-marker-container { 
+    display: flex; 
+    justify-content: center; 
+    align-items: flex-end; 
+    width: 40px; 
+    height: 40px; 
+    animation: dropDown 0.5s cubic-bezier(0.25, 1, 0.5, 1) forwards; 
+}
+.target-marker { 
+    font-size: 36px; 
+    filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.4)); 
+    line-height: 1; 
+}
+@keyframes dropDown { 
+    0% { transform: translateY(-30px); opacity: 0; } 
+    100% { transform: translateY(0); opacity: 1; } 
+}
+.custom-div-icon { 
+    background: none !important; 
+    border: none !important; 
+}
+
+/* 🔧 修正搜尋標籤的小箭頭位置與顏色 */
+.leaflet-tooltip-top.custom-map-label::before {
+    border-top-color: #10b981 !important; /* 讓小箭頭的顏色變成跟邊框一樣的綠色 */
+    bottom: -10px !important;              /* 修正微調箭頭的垂直位置，使其緊貼標籤底部 */
+    left: 50% !important;                  /* 確保箭頭水平置中 */
+    transform: translateX(-50%) !important;
+}
+
+/* 移除 Leaflet 預設的白色背景與黑邊框干擾 */
+.leaflet-tooltip.custom-map-label {
+    background-color: #ffffff !important;
+    border: 2px solid #10b981 !important;
+}
+
+
+/* 🔧 拔掉搜尋標籤下方的綠色小箭頭 */
+.leaflet-tooltip-top.custom-map-label::before,
+.leaflet-tooltip-bottom.custom-map-label::before,
+.leaflet-tooltip-left.custom-map-label::before,
+.leaflet-tooltip-right.custom-map-label::before {
+    display: none !important; /* 直接隱藏箭頭元素 */
+}
+
+/* 確保 Leaflet 預設的邊框干擾被清除 */
+.leaflet-tooltip.custom-map-label {
+    background-color: #ffffff !important;
+    border: 2px solid #10b981 !important;
+}
