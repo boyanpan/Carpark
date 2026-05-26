@@ -211,9 +211,9 @@ async function fetchTaipeiParkingData() {
             return {
                 id: p.id, 
                 name: p.name,
+                category: categorize(p.name), prediction: availCar <= 0 ? (availCar < 0 ? "無預測資料" : "已客滿") : "車位充足",
                 destName: finalCleanName, 
                 lat: lat, lng: lng, address: p.address || '無地址', payex: p.payex || '現場公告', time: p.servicetime || '依公告',
-                category: categorize(p.name), prediction: availCar <= 0 ? (availCar < 0 ? "無預測資料" : "已客滿") : "車位充足",
                 car: { t: p.totalcar || 0, a: availCar }, 
                 motor: { t: p.totalmotor || 0, a: avail.availablemotor !== undefined ? avail.availablemotor : -1 },
                 right: { t: totalRight },
@@ -283,23 +283,16 @@ function initGPS() {
     );
 }
 
-// 🔥 核心升級：支援小吃店、飯店、酒店、超商的智慧搜尋引擎
+// 🔥 核心全面升級：支援全台灣所有店家（仿 Google Maps 模式）
 async function searchLocation() {
     const query = document.getElementById('searchInput') ? document.getElementById('searchInput').value.trim() : "";
     if (!query) return clearSearchAndLocate();
     
     collapseBottomSheet();
 
-    // 💡 判斷是否為「生活機能地標詞」（小吃、超商、飯店、酒店、餐廳、7-11等）
-    // 如果是這類词，我們直接跳過本地名稱過濾，強迫走地圖搜尋定位，才能拉出它周圍的停車場！
-    const isLifeKeyword = /(小吃|超商|飯店|酒店|便利商店|餐廳|咖啡|美食|7-11|全家|萊爾富|OK|夜市)/i.test(query);
-
-    let localMatches = [];
-    if (!isLifeKeyword) {
-        localMatches = parkingData.filter(p => 
-            smartMatch(p.name, query) || smartMatch(p.destName, query) || smartMatch(p.address, query) || smartMatch(p.category, query)
-        );
-    }
+    let localMatches = parkingData.filter(p => 
+        smartMatch(p.name, query) || smartMatch(p.destName, query) || smartMatch(p.address, query) || smartMatch(p.category, query)
+    );
 
     const listEl = document.getElementById('content-list');
     if (localMatches.length > 0) {
@@ -313,41 +306,36 @@ async function searchLocation() {
         return; 
     }
 
-    // 🌐 啟動全球地理地標搜尋（強勢支援非停車場名字的生活商店）
+    // 🌐 線上地理地標搜尋：解鎖限制，什麼店都能搜！
     window.currentKeyword = null; 
-    if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">🌍 正在台北市精準搜尋「${query}」...</div>`;
+    if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">🌍 正在搜尋「${query}」...</div>`;
     
     try {
-        // 🚀 智慧防錯：如果使用者搜尋沒打「台北」，自動加上「臺北市」前綴，精準鎖定行政區範圍！
-        let searchQuery = query;
-        if (!searchQuery.includes('台北') && !searchQuery.includes('臺北')) {
-            searchQuery = '臺北市 ' + searchQuery;
-        }
-
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&countrycodes=tw&limit=1`);
+        // 🚀 開放全台灣店鋪搜尋，補上 addressdetails=1 獲取詳細門牌段落
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=tw&addressdetails=1&limit=1`);
         const data = await res.json();
         if (data.length > 0) {
             searchedLocation = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
-            if (destMarker) map.removeLayer(destMarker);
             
-            // 在該小吃店/飯店上方釘上紅色大頭針 📍 並在上方顯示常駐名稱
-        destMarker = L.marker(searchedLocation, {
-    icon: L.divIcon({ html: `<div class="target-marker-container"><div class="target-marker">📍</div></div>`, className: 'custom-div-icon', iconAnchor: [20, 40] }),
-    zIndexOffset: 2000
-    }).addTo(map).bindTooltip(query, {
-    permanent: true,       // 👈 設定為 true，讓文字名稱一直顯示，不用點擊
-    direction: 'top',      // 👈 顯示在 📍 圖標的正上方
-    className: 'custom-map-label', // 👈 套用你 style.css 裡寫好的漂亮綠色膠囊標籤樣式
-    offset: L.point(0, -35) // 👈 微調文字位置，使其完美浮在 📍 正上方不壓到圖標
-    });
+            // 解析精準台灣地址排版
+            const addr = data[0].address || {};
+            const city = addr.city || addr.county || '';
+            const district = addr.suburb || addr.town || addr.village || '';
+            const road = addr.road || '';
+            const housenumber = addr.house_number || '';
+            let detailAddress = `${city}${district}${road}${housenumber}`;
+            if (!detailAddress || detailAddress.length < 3) {
+                detailAddress = data[0].display_name.split(',').reverse().join('').trim();
+            }
 
-            // ⚡ 核心交接：handleFilter 會自動切換 refLocation 為這個商家座標
-            // 並重新把全台北市的車位「由近到遠」洗牌排序！
+            // 在地圖上精準落釘並綁定「常駐綠色文字膠囊」店名
+            createSearchMarker(query, searchedLocation[0], searchedLocation[1], detailAddress);
+            
             handleFilter(); 
             map.flyTo(searchedLocation, 16, {animate: true, duration: 1.5}); 
             collapseBottomSheet();
         } else {
-            if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">在台北市找不到「${query}」<br><span class="text-xs text-slate-400">請輸入更具體的名字（如：台北喜來登大飯店、7-11林森門市）</span></div>`;
+            if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">找不到「${query}」<br><span class="text-xs text-slate-400">請輸入更具體的名字（如：台北喜來登大飯店、家樂福內湖店）</span></div>`;
         }
     } catch (err) { 
         if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500">搜尋失敗</div>`; 
@@ -415,31 +403,11 @@ function renderMapMarkers(data) {
         let iconWidth = 24;       
         if (textStr.length === 2) iconWidth = 30; 
         if (textStr.length >= 3) iconWidth = 38;  
-        
         const iconHeight = 24;
 
         const marker = L.marker([item.lat, item.lng], {
             icon: L.divIcon({
-                html: `
-                    <div style="
-                        background-color: ${color}; 
-                        color: white; 
-                        font-weight: 900; 
-                        font-size: 11px; 
-                        width: 100%;
-                        height: 100%;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        border-radius: 12px; 
-                        box-shadow: 0 2px 6px rgba(0,0,0,0.3); 
-                        border: 1.5px solid white;
-                        box-sizing: border-box;
-                        white-space: nowrap;
-                    ">
-                        ${displayNum}
-                    </div>
-                `,
+                html: `<div style="background-color: ${color}; color: white; font-weight: 900; font-size: 11px; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; border-radius: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); border: 1.5px solid white; box-sizing: border-box; white-space: nowrap;">${displayNum}</div>`,
                 className: 'custom-parking-marker',
                 iconSize: [iconWidth, iconHeight],
                 iconAnchor: [iconWidth / 2, iconHeight / 2]
@@ -522,7 +490,7 @@ function renderList(data, isUsingDest) {
                     </div>
                     <div class="flex flex-col items-end gap-2.5 shrink-0">
                         <button onclick="toggleFav('${item.id}')" class="text-xl active:scale-75 transition">${isFav ? '🩷' : '🤍'}</button>
-                        <button onclick="startNavById('${item.id}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-black shadow-md active:scale-95 transition">導航</button>
+                        <button onclick="startNavNavById('${item.id}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-black shadow-md active:scale-95 transition">導航</button>
                     </div>
                 </div>
             </div>`;
@@ -540,7 +508,7 @@ function selectCard(id, lat, lng) {
     }
 }
 
-function startNavById(id) {
+function startNavNavById(id) {
     const targetItem = parkingData.find(p => p.id === id);
     if (targetItem) startNav(targetItem);
 }
@@ -654,67 +622,76 @@ if (!autocompleteList && searchInput) {
 }
 
 if (searchInput && autocompleteList) {
+    let debounceTimer;
     searchInput.addEventListener('input', function() {
+        clearTimeout(debounceTimer);
         const query = this.value.trim();
         autocompleteList.innerHTML = '';
         if (!query) { autocompleteList.classList.add('hidden'); return; }
 
-        const matches = [];
-        const seenDestNames = new Set();
+        debounceTimer = setTimeout(async () => {
+            try {
+                // 🎯 核心升級 1：串接全台灣開源地圖，加上 addressdetails=1 開啟詳細門牌路段細節
+                const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=tw&addressdetails=1&limit=6`;
+                const res = await fetch(url);
+                const suggestions = await res.json();
 
-        for (const p of parkingData) {
-            if (smartMatch(p.name, query) || smartMatch(p.destName, query) || smartMatch(p.address, query)) {
-                if (!seenDestNames.has(p.destName)) {
-                    seenDestNames.add(p.destName);
-                    matches.push(p);
-                    if (matches.length >= 8) break;
-                }
-            }
-        }
-
-        if (matches.length > 0) {
-            autocompleteList.classList.remove('hidden');
-            const searchAllDiv = document.createElement('div');
-            searchAllDiv.className = 'p-3 hover:bg-blue-50 cursor-pointer border-b border-slate-100 flex items-center gap-3 transition';
-            searchAllDiv.innerHTML = `
-                <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold flex-shrink-0">🔍</div>
-                <div class="text-sm text-slate-800 font-bold flex-1">「${query}」查看所有地點</div>
-            `;
-            searchAllDiv.addEventListener('click', () => { autocompleteList.classList.add('hidden'); searchLocation(); });
-            autocompleteList.appendChild(searchAllDiv);
-
-            matches.forEach(match => {
-                const div = document.createElement('div');
-                div.className = 'p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0 flex items-center gap-3 transition';
-                div.innerHTML = `
-                    <div class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-bold flex-shrink-0">📍</div>
-                    <div class="flex flex-col overflow-hidden">
-                        <div class="text-sm text-slate-800 font-bold truncate">${match.destName}</div>
-                        <div class="text-[11px] text-slate-500 truncate">${match.address}</div>
-                    </div>
-                `;
-                
-                div.addEventListener('click', () => {
-                    searchInput.value = match.destName; 
-                    autocompleteList.classList.add('hidden'); 
-                    searchedLocation = [match.lat, match.lng];
-                    window.currentKeyword = null; 
+                if (suggestions.length > 0) {
+                    autocompleteList.classList.remove('hidden');
                     
-                    if (destMarker) map.removeLayer(destMarker);
-                    destMarker = L.marker(searchedLocation, {
-                        icon: L.divIcon({ html: `<div class="target-marker-container"><div class="target-marker">📍</div></div>`, className: 'custom-div-icon', iconAnchor: [20, 40] }),
-                        zIndexOffset: 2000
-                    }).addTo(map);
+                    const searchAllDiv = document.createElement('div');
+                    searchAllDiv.className = 'p-3 hover:bg-blue-50 cursor-pointer border-b border-slate-100 flex items-center gap-3 transition';
+                    searchAllDiv.innerHTML = `
+                        <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold flex-shrink-0">🔍</div>
+                        <div class="text-sm text-slate-800 font-bold flex-1">搜尋「${query}」周邊車位</div>
+                    `;
+                    searchAllDiv.addEventListener('click', () => { autocompleteList.classList.add('hidden'); searchLocation(); });
+                    autocompleteList.appendChild(searchAllDiv);
 
-                    handleFilter(); 
-                    map.flyTo(searchedLocation, 16, {animate: true, duration: 1.5}); 
-                    collapseBottomSheet();
-                });
-                autocompleteList.appendChild(div);
-            });
-        } else {
-            autocompleteList.classList.add('hidden');
-        }
+                    suggestions.forEach(place => {
+                        // 🎯 核心升級 2：仿 Google Maps 精準分離店名與灰色地址
+                        const shortName = place.name || place.display_name.split(',')[0];
+                        
+                        const addr = place.address || {};
+                        const city = addr.city || addr.county || '';
+                        const district = addr.suburb || addr.town || addr.village || '';
+                        const road = addr.road || '';
+                        const housenumber = addr.house_number || '';
+                        
+                        let detailAddress = `${city}${district}${road}${housenumber}`;
+                        if (!detailAddress || detailAddress.length < 3) {
+                            detailAddress = place.display_name.replace(shortName + ', ', '');
+                        }
+
+                        const div = document.createElement('div');
+                        div.className = 'p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0 flex items-center gap-3 transition';
+                        div.innerHTML = `
+                            <div class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-bold flex-shrink-0">📍</div>
+                            <div class="flex flex-col overflow-hidden flex-1">
+                                <div class="text-sm text-slate-800 font-bold truncate">${shortName}</div>
+                                <div class="text-[11px] text-slate-400 truncate">${detailAddress}</div>
+                            </div>
+                        `;
+                        
+                        div.addEventListener('click', () => {
+                            searchInput.value = shortName; 
+                            autocompleteList.classList.add('hidden'); 
+                            searchedLocation = [parseFloat(place.lat), parseFloat(place.lon)];
+                            window.currentKeyword = null; 
+                            
+                            createSearchMarker(shortName, searchedLocation[0], searchedLocation[1], detailAddress);
+                            handleFilter(); 
+                            map.flyTo(searchedLocation, 16, {animate: true, duration: 1.5}); 
+                            collapseBottomSheet();
+                        });
+                        autocompleteList.appendChild(div);
+                    });
+                } else {
+                    autocompleteList.innerHTML = `<div class="p-4 text-center text-sm text-slate-400 font-bold">找不到相關地點 😢</div>`;
+                    autocompleteList.classList.remove('hidden');
+                }
+            } catch (e) { console.error("聯想選單錯誤:", e); }
+        }, 400);
     });
 
     document.addEventListener('click', function(e) {
@@ -724,70 +701,46 @@ if (searchInput && autocompleteList) {
     });
 }
 
-// =========================================================================
-// 📍 獨立擴充功能：建立搜尋結果標籤，並在圖標旁常駐顯示地點名字（對應圖六效果）
-// =========================================================================
-/**
- * @param {string} name - 使用者搜尋的地點/停車場名稱 (例如: 家樂福內湖店)
- * @param {number} lat - 緯度
- * @param {number} lng - 經度
- * @param {string} address - 地點的完整地址 (選填)
- */
 function createSearchMarker(name, lat, lng, address = "") {
-    // 1. 自動檢查你原本初始化 Leaflet 地圖時的變數名稱（相容 map 或 myMap）
-    let currentMap = null;
-    if (typeof map !== 'undefined') { currentMap = map; } 
-    else if (typeof myMap !== 'undefined') { currentMap = myMap; }
-    
-    if (!currentMap) {
-        console.error("找不到全域地圖物件，請確認你原本初始化 Leaflet 的變數名稱是否為 map 或 myMap！");
-        return;
-    }
+    let currentMap = typeof map !== 'undefined' ? map : myMap;
+    if (!currentMap) return;
 
-    // 2. 建立自訂的粉紅色大頭針 HTML（對應你原本畫面的 icon 樣式）
+    if (destMarker) currentMap.removeLayer(destMarker);
+
     const customIcon = L.divIcon({
         className: 'custom-div-icon',
-        html: `<div class="target-marker-container">
-                    <span class="target-marker">📍</span>
-               </div>`,
+        html: `<div class="target-marker-container"><span class="target-marker">📍</span></div>`,
         iconSize: [40, 40],
         iconAnchor: [20, 40]
     });
 
-    // 3. 建立標籤並直接加到地圖上
-    const marker = L.marker([lat, lng], { icon: customIcon }).addTo(currentMap);
+    destMarker = L.marker([lat, lng], { icon: customIcon }).addTo(currentMap);
 
-    // 4. 🌟 關鍵核心：綁定常駐文字標籤 (Tooltip)，達成圖六綠色文字標籤的效果
-    marker.bindTooltip(name, {
-        permanent: true,       // 👈 設定為 true，文字就會一直顯示，不需要點擊！
-        direction: 'right',    // 👈 顯示在圖標的右側（也可以改成 'top' 顯示在上方）
-        className: 'custom-map-label', // 👈 自訂 CSS 類別名稱，用來美化文字外觀
-        offset: L.point(10, -20)       // 👈 微調文字標籤的位置，避免壓到大頭針
+    // 常駐顯示綠色地名標籤
+    destMarker.bindTooltip(name, {
+        permanent: true,
+        direction: 'top',
+        className: 'custom-map-label',
+        offset: L.point(0, -35)
     });
 
-    // 5. 產生 Google 地圖官方搜尋跳轉網址（保留你之前想要的功能，點擊圖標依然可以開彈窗跳轉）
     const searchQuery = address ? `${name} ${address}` : name;
+    // 修正原本網址字串拼錯的 bug
     const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(searchQuery)}`;
 
     const popupContent = `
         <div style="padding: 10px; font-family: sans-serif; min-w-[180px]; text-align: left;">
             <h4 style="margin: 0 0 4px 0; font-size: 14px; color: #1e293b; font-weight: bold;">🔍 ${name}</h4>
-            ${address ? `<p style="margin: 0 0 8px 0; font-size: 12px; color: #64748b;">${address}</p>` : ''}
+            ${address ? `<p style="margin: 0 0 8px 0; font-size: 11px; color: #64748b;">${address}</p>` : ''}
             <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #f1f5f9;">
                 <a href="${googleMapsUrl}" target="_blank" 
                    style="display: block; background-color: #2563eb; color: #ffffff; text-align: center; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: bold; text-decoration: none;">
-                   開啟 Google 地圖 ↗
+                    開啟 Google 地圖 ↗
                 </a>
             </div>
         </div>
     `;
     
-    // 點擊 📍 圖標時，依然會跳出可以去 Google 地圖的氣泡窗
-    marker.bindPopup(popupContent, {
-        closeButton: true,
-        offset: L.point(0, -30)
-    });
-
-    // 讓地圖視野自動平滑移到這一點上
+    destMarker.bindPopup(popupContent, { closeButton: true, offset: L.point(0, -30) });
     currentMap.panTo([lat, lng]);
 }

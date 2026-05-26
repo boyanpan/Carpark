@@ -16,14 +16,21 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 # ⚙️ 初始化 Flask，並將靜態檔案資料夾直接指定為 'car'
 app = Flask(__name__, static_folder='car', static_url_path='/')
-CORS(app)
+
+# 🎯 強制開大門：允許任何來源 (*)、任何 Methods、任何 Headers，徹底消滅 CORS policy 錯誤！
+CORS(app, resources={
+    r"/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": "*"
+    }
+})
 
 # =========================================================
 # ☁️ Aiven 資料庫連線設定
 # =========================================================
 DB_CONFIG = {
     'user': 'avnadmin',
-    # 🔥 密碼改成從「環境變數」讀取，不再寫死在程式碼裡！
     'password': os.environ.get('DB_PASSWORD'), 
     'host': 'mysql-14bf0d58-iljsauw-7901.c.aivencloud.com',
     'port': 11576,
@@ -148,37 +155,30 @@ def load_metro_data():
     except: pass
 
 # =========================================================
-# 🌐 網頁路由區塊 (讓 Flask 自動導向 car 資料夾)
+# 🌐 網頁路由區塊
 # =========================================================
 @app.route("/")
 def serve_index():
-    # 當瀏覽器開啟 127.0.0.1:5000 時，直接讀取 car 資料夾內的 index.html
     return app.send_static_file('index.html')
 
 # =========================================================
-# 🚀 API 端點
+# 🚀 API 端點 (保留功能)
 # =========================================================
 @app.route("/nearby")
 def nearby():
-    # 目前前端測試版改為直連政府 API，此端點保留供未來使用
     return jsonify({"message": "後端服務正常，目前前端處於直連政府開放資料之測試模式"})
 
-# =========================================================
-# 🔥 主程式進入點
-# =========================================================
 if __name__ == "__main__":
     init_db()          
     load_metro_data()  
     sync_data_to_db()  
     
-    # 背景自動同步排程 (每 3 分鐘)
     scheduler = BackgroundScheduler(daemon=True)
     scheduler.add_job(func=sync_data_to_db, trigger='interval', minutes=3)
     scheduler.start()
     print("[INFO] ⏱️ 背景自動更新排程已啟動 (每 3 分鐘)")
 
     try:
-        # 執行本地伺服器
         app.run(port=5000, debug=False) 
     except (KeyboardInterrupt, SystemExit):
         scheduler.shutdown()
