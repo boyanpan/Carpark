@@ -1,8 +1,7 @@
 Flask
-flask-cors
-mysql-connector-python
-pandas
+Flask-Cors
 requests
+pandas
+mysql-connector-python
 pyproj
 APScheduler
-gunicorn

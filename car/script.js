@@ -1,26 +1,28 @@
 // ==========================================
-// Proj4 座標定義 (保留供未來轉換參考)
+// Proj4 座標定義
 // ==========================================
 proj4.defs("EPSG:3826", "+proj=tmerc +lat_0=0 +lon_0=121 +k=0.9999 +x_0=250000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs");
 
 // ==========================================
 // 1. 初始化地圖與全域變數
 // ==========================================
-const API_BASE_URL = "https://carpark-8jl3.onrender.com"; // 🎯 串接你的 Render 雲端後端網址
+// 🎯 全自動識別後端網址：本地開發就用本地，雲端部署就用雲端！
+const API_BASE_URL = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') 
+    ? "http://127.0.0.1:5000" 
+    : window.location.origin;
+
 const map = L.map('map', { zoomControl: false, tap: false }).setView([25.0339, 121.5644], 14);
 L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
 
-// 初始化聚合圖層
 const markerCluster = L.markerClusterGroup({ chunkedLoading: true, disableClusteringAtZoom: 16, maxClusterRadius: 60 });
 map.addLayer(markerCluster);
 
-let globalParkingData = []; // 🎯 存放從你的 Aiven 資料庫抓回來的真實資料
+let globalParkingData = []; 
 let userLocation = null, previousLocation = null, currentHeading = 0, hasCompass = false;
 let userMarker = null, searchedLocation = null, destMarker = null, radiusCircle = null;
 let routingControl = null, isNavigating = false, currentDestination = null, currentTab = 'search';
 let favorites = JSON.parse(localStorage.getItem('p_favs')) || [];
 
-// 取得 UI 元件
 const bottomSheet = document.getElementById('bottom-sheet');
 const searchPanel = document.getElementById('search-panel');
 const dragHandle = document.getElementById('drag-handle');
@@ -30,7 +32,7 @@ let startY = 0, currentHeight = 0, isSheetExpanded = false;
 if (window.innerWidth < 768 && bottomSheet) bottomSheet.style.height = '35vh';
 
 // ==========================================
-// 2. 行動端行動抽屜 (Bottom Sheet) 拖曳邏輯
+// 2. 行動抽屜 (Bottom Sheet) 拖曳邏輯
 // ==========================================
 window.toggleBottomSheet = function() {
     if (window.innerWidth >= 768 || !bottomSheet) return;
@@ -225,19 +227,19 @@ function smartMatch(targetStr, queryStr) {
 async function fetchParkingFromBackend(lat, lng) {
     try {
         const listEl = document.getElementById('content-list');
-        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">📡 正在從 Aiven 雲端讀取即時車位...</div>`;
+        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">📡 正在從後端讀取即時車位...</div>`;
         
-        // 呼叫你的 Flask API 端點
         const res = await fetch(`${API_BASE_URL}/nearby?lat=${lat}&lng=${lng}&max_walk=999`);
+        if (!res.ok) throw new Error("伺服器回應錯誤");
+        
         const data = await res.json();
         
-        // 接上手頭擁有的真實洗牌資料
         globalParkingData = data.nearby || [];
         handleFilter();
     } catch (err) {
-        console.error("雲端資料讀取失敗:", err);
+        console.error("資料讀取失敗:", err);
         const listEl = document.getElementById('content-list');
-        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">無法連接雲端伺服器<br><span class="text-xs font-normal text-slate-400">請確認你的 Render 後端是否在正常運作</span></div>`;
+        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">無法連接伺服器<br><span class="text-xs font-normal text-slate-400">請確認後端是否在正常運作 (${API_BASE_URL})</span></div>`;
     }
 }
 
@@ -254,7 +256,7 @@ async function searchLocation() {
         let cleanQuery = normalizeText(rawQuery);
         let roadOnlyQuery = cleanQuery.replace(/\d+\s*[號之-]\s*\d+\s*([樓室Ff區])?/g, '').replace(/\d+\s*[號樓室Ff]/g, '').trim() || cleanQuery;
 
-        // 1️⃣ 策略一：先在已載入的資料庫中尋找 (智能碎片比對)
+        // 1️⃣ 策略一：本地資料庫比對
         let localMatches = globalParkingData.filter(p => smartMatch(p.name, roadOnlyQuery) || smartMatch(p.address, roadOnlyQuery));
         if (localMatches.length > 0) {
             const centerMatch = localMatches[0];
@@ -265,7 +267,7 @@ async function searchLocation() {
             return;
         }
 
-        // 2️⃣ 策略二：串接 OSM 引擎，【精準鎖定在台北市區邊界】(viewbox 與 bounded=1)
+        // 2️⃣ 策略二：串接 OSM 引擎
         let searchQuery = rawQuery;
         if (!searchQuery.includes('台北') && !searchQuery.includes('臺北')) searchQuery = '臺北市 ' + searchQuery;
         
@@ -277,10 +279,7 @@ async function searchLocation() {
             searchedLocation = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
             let shortAddress = data[0].display_name.split(',').reverse().join(' ').replace(/臺灣/g, '').trim();
             
-            // 建立具有圖六常駐文字膠囊綠色標籤的地標
             createSearchMarker(rawQuery, searchedLocation[0], searchedLocation[1], shortAddress);
-            
-            // 丟給 Render 後端直接去撈這個地點周遭的所有車位
             await fetchParkingFromBackend(searchedLocation[0], searchedLocation[1]);
             map.flyTo(searchedLocation, 16, {animate: true, duration: 1.5});
         } else {
@@ -303,7 +302,6 @@ function createSearchMarker(name, lat, lng, address = "") {
 
     destMarker = L.marker([lat, lng], { icon: customIcon }).addTo(map);
 
-    // 🌟 核心加值：綁定常駐文字標籤 (Tooltip)
     destMarker.bindTooltip(name, {
         permanent: true,
         direction: 'right',
@@ -348,7 +346,6 @@ function clearSearchAndLocate() {
 function handleFilter() {
     markerCluster.clearLayers();
     
-    // 過濾我的收藏與附近推薦
     let data = (currentTab === 'search') ? [...globalParkingData] : globalParkingData.filter(p => favorites.includes(p.id));
     
     const radiusSelect = document.getElementById('radiusSelect');
@@ -357,7 +354,6 @@ function handleFilter() {
 
     if (radiusCircle) map.removeLayer(radiusCircle);
 
-    // 重新計算與搜尋中心點的距離
     if (refLocation) {
         data = data.map(p => ({ ...p, distance: calculateDistance(refLocation[0], refLocation[1], p.lat, p.lng) }));
         if (radiusMeters < 99999) {
@@ -394,7 +390,6 @@ function renderMapMarkers(data) {
             })
         });
 
-        // 彈窗表格生成器
         const buildRow = (icon, label, total, avail, isSpecial = false) => {
             if(total <= 0) return '';
             if (isSpecial) {
@@ -412,11 +407,7 @@ function renderMapMarkers(data) {
                 <p class="text-[10px] text-slate-500 mb-2 flex items-center gap-1 font-medium"><span class="text-pink-500 text-xs">📍</span>${item.address}</p>
                 <div class="bg-slate-50 rounded-lg px-2.5 border border-slate-100 mb-2 shadow-inner">
                     ${buildRow('🚗', '汽車', item.totalcar, item.availablecar)}
-                    ${buildRow('♿', '身障', item.right ? item.right.t : 0, 0, true)}
-                    ${buildRow('🤰', '婦幼', item.women ? item.women.t : 0, 0, true)}
-                    ${buildRow('⚡', '電動', item.ev ? item.ev.t : 0, 0, true)}
                 </div>
-                ${item.prediction ? `<div class="bg-yellow-50 text-yellow-700 text-[10px] font-bold p-2.5 rounded-lg border border-yellow-100 mb-2 text-center shadow-sm">🤖 ${item.prediction}</div>` : ''}
                 <div class="text-slate-700 text-[10px] bg-slate-50 p-2 rounded-md border border-slate-100 leading-relaxed max-h-[120px] overflow-y-auto no-scrollbar">💰 費率規範請現場公告為準</div>
             </div>
         `);
@@ -441,7 +432,7 @@ function renderList(data, isUsingDest) {
         const distLabel = isUsingDest ? "📍 距目的地:" : "📍 距您目前:";
         const isTopPick = (index === 0 && !isFull && !hasNoData);
         
-        const priceDisplay = item.pricePerHour ? `$${item.pricePerHour}/hr` : '現場公告費率';
+        const priceDisplay = item.pricePerHour ? `$${item.pricePerHour}/hr` : '現場公告';
         const safeItemStr = encodeURIComponent(JSON.stringify(item));
 
         listEl.innerHTML += `
@@ -454,7 +445,6 @@ function renderList(data, isUsingDest) {
                             ${isTopPick ? '<span class="recommend-badge shrink-0">最佳</span>' : ''}
                         </div>
                         <p class="text-[9px] text-slate-400 mb-2 truncate">${item.address}</p>
-                        ${item.prediction ? `<div class="bg-yellow-50 text-yellow-700 text-[9px] font-bold px-1.5 py-0.5 rounded mb-2 inline-block shadow-sm">🤖 ${item.prediction}</div>` : ''}
                         <div class="flex flex-wrap gap-1 mb-2">
                             <span class="text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm flex items-center gap-1 ${colorClass}">🚗 汽車 <span class="opacity-90">${avCar}/${item.totalcar || '?'}</span></span>
                             <span class="text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm bg-slate-100 text-slate-700 border border-slate-200">💰 ${priceDisplay}</span>
@@ -595,13 +585,11 @@ function initAutocomplete() {
             
             if (!query) { autocompleteList.classList.add('hidden'); return; }
 
-            // 實作防抖設計，手停下 400ms 後才呼叫地理建議
             debounceTimer = setTimeout(async () => {
                 try {
                     let mapQuery = query;
                     if (!mapQuery.includes('台北') && !mapQuery.includes('臺北')) mapQuery = '臺北市 ' + mapQuery;
                     
-                    // 【關鍵限縮】: 加上 viewbox 強制將搜尋範圍綁定在台北市
                     const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(mapQuery)}&countrycodes=tw&viewbox=121.43,25.21,121.67,24.96&bounded=1&limit=6`;
                     const res = await fetch(url);
                     const suggestions = await res.json();
@@ -609,7 +597,6 @@ function initAutocomplete() {
                     if (suggestions.length > 0) {
                         autocompleteList.classList.remove('hidden');
                         
-                        // 查看全地點選項
                         const searchAllDiv = document.createElement('div');
                         searchAllDiv.className = 'p-3 hover:bg-blue-50 cursor-pointer border-b border-slate-100 flex items-center gap-3 transition';
                         searchAllDiv.innerHTML = `<div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold flex-shrink-0">🔍</div><div class="text-sm text-slate-800 font-bold flex-1">「${query}」查看所有附近車位</div>`;

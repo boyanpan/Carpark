@@ -143,14 +143,11 @@ def sync_data_to_db():
 def serve_index():
     return app.send_static_file('index.html')
 
-# =========================================================
-# 🚀 核心更動：將 /nearby 從「測試訊息」改為「從資料庫撈取真實資料」
-# =========================================================
 @app.route("/nearby")
 def nearby():
     try:
         conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True) # 以字典格式返回，方便轉換為 JSON
+        cursor = conn.cursor(dictionary=True)
         cursor.execute("SELECT * FROM parking_lots")
         rows = cursor.fetchall()
         cursor.close()
@@ -158,7 +155,6 @@ def nearby():
         
         formatted_data = []
         for row in rows:
-            # 將資料庫的蛇形命名 (total_car) 轉換為前端期待的命名 (totalcar)
             formatted_data.append({
                 "id": row["id"],
                 "name": row["name"],
