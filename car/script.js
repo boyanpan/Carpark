@@ -1,6 +1,11 @@
+// ==========================================
+// Proj4 座標定義 (保留供未來轉換參考)
+// ==========================================
 proj4.defs("EPSG:3826", "+proj=tmerc +lat_0=0 +lon_0=121 +k=0.9999 +x_0=250000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs");
 
-// 初始化地圖 (預設定位在台北 101，若 GPS 成功會自動飛過去)
+// ==========================================
+// 1. 初始化地圖與全域變數 (預設定位在台北 101)
+// ==========================================
 const map = L.map('map', { zoomControl: false, tap: false }).setView([25.0339, 121.5644], 14);
 L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png').addTo(map);
 const markerCluster = L.markerClusterGroup({ chunkedLoading: true, disableClusteringAtZoom: 16, maxClusterRadius: 60 });
@@ -85,7 +90,9 @@ map.on('dragend', () => {
     }
 });
 
-// 更新車輛圖示的旋轉角度
+// ==========================================
+// 2. 指南針與定位朝向控制
+// ==========================================
 function updateCarIcon() {
     if (userMarker) {
         const carIconHtml = `<div class="car-marker-container" style="transform: rotate(${currentHeading}deg);"><div class="car-marker">🚘</div></div>`;
@@ -93,7 +100,6 @@ function updateCarIcon() {
     }
 }
 
-// 處理手機感測器回傳的角度資料 (指北針)
 function handleOrientation(event) {
     let heading = null;
     if (event.webkitCompassHeading !== undefined && event.webkitCompassHeading !== null) {
@@ -108,7 +114,6 @@ function handleOrientation(event) {
     }
 }
 
-// 啟動指南針與請求授權
 function initCompass() {
     if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
         DeviceOrientationEvent.requestPermission()
@@ -140,7 +145,9 @@ function smartMatch(targetStr, queryStr) {
     return false;
 }
 
-// 異步獲取臺北市停車場資料
+// ==========================================
+// 3. 異步載入台北市公用停車場資料 (直連市府 Blob 測試版)
+// ==========================================
 async function fetchTaipeiParkingData() {
     try {
         console.log("正在下載台北市停車場資料...");
@@ -283,7 +290,9 @@ function initGPS() {
     );
 }
 
-// 🔥 核心全面升級：支援全台灣所有店家（仿 Google Maps 模式）
+// ==========================================
+// 4. 🔥 智慧核心：搜尋全台北市生活地標、店家與行政區
+// ==========================================
 async function searchLocation() {
     const query = document.getElementById('searchInput') ? document.getElementById('searchInput').value.trim() : "";
     if (!query) return clearSearchAndLocate();
@@ -306,36 +315,43 @@ async function searchLocation() {
         return; 
     }
 
-    // 🌐 線上地理地標搜尋：解鎖限制，什麼店都能搜！
     window.currentKeyword = null; 
-    if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">🌍 正在搜尋「${query}」...</div>`;
+    if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">🌍 正在台北地區搜尋「${query}」...</div>`;
     
     try {
-        // 🚀 開放全台灣店鋪搜尋，補上 addressdetails=1 獲取詳細門牌段落
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=tw&addressdetails=1&limit=1`);
+        // 🚀 強制加上「臺北市」前綴與開啟詳細地址結構，限縮核心範圍在台北
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent('臺北市 ' + query)}&countrycodes=tw&addressdetails=1&limit=1`);
         const data = await res.json();
+        
         if (data.length > 0) {
-            searchedLocation = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
-            
-            // 解析精準台灣地址排版
             const addr = data[0].address || {};
             const city = addr.city || addr.county || '';
+            const displayName = data[0].display_name || '';
+
+            // 🛑 嚴格台北防禦限制：非台北區域，拒絕回傳結果
+            if (!city.includes('台北') && !city.includes('臺北') && !displayName.includes('台北') && !displayName.includes('臺台')) {
+                if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">搜尋失敗<br><span class="text-xs text-slate-400">「${query}」不屬於台北地區！</span></div>`;
+                return;
+            }
+
+            searchedLocation = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+            
             const district = addr.suburb || addr.town || addr.village || '';
             const road = addr.road || '';
             const housenumber = addr.house_number || '';
             let detailAddress = `${city}${district}${road}${housenumber}`;
             if (!detailAddress || detailAddress.length < 3) {
-                detailAddress = data[0].display_name.split(',').reverse().join('').trim();
+                detailAddress = displayName.split(',').reverse().join('').trim();
             }
 
-            // 在地圖上精準落釘並綁定「常駐綠色文字膠囊」店名
+            // 在地圖上精準釘上 📍 大頭針，並且常駐顯示綠色膠囊文字標籤
             createSearchMarker(query, searchedLocation[0], searchedLocation[1], detailAddress);
             
             handleFilter(); 
             map.flyTo(searchedLocation, 16, {animate: true, duration: 1.5}); 
             collapseBottomSheet();
         } else {
-            if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">找不到「${query}」<br><span class="text-xs text-slate-400">請輸入更具體的名字（如：台北喜來登大飯店、家樂福內湖店）</span></div>`;
+            if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">在台北市找不到「${query}」<br><span class="text-xs text-slate-400">請輸入台北市內更具體的名字</span></div>`;
         }
     } catch (err) { 
         if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500">搜尋失敗</div>`; 
@@ -354,6 +370,9 @@ function clearSearchAndLocate() {
     if (userLocation) map.flyTo(userLocation, 15, { animate: true });
 }
 
+// ==========================================
+// 5. 資料分析過濾器與地圖標記、卡片列表渲染
+// ==========================================
 function handleFilter() {
     if (parkingData.length === 0) return;
     markerCluster.clearLayers();
@@ -508,6 +527,9 @@ function selectCard(id, lat, lng) {
     }
 }
 
+// ==========================================
+// 6. 即時路徑導航引擎
+// ==========================================
 function startNavNavById(id) {
     const targetItem = parkingData.find(p => p.id === id);
     if (targetItem) startNav(targetItem);
@@ -582,6 +604,9 @@ function stopNavigation() {
     else if (userLocation) map.flyTo(userLocation, 15, { animate: true }); 
 }
 
+// ==========================================
+// 7. 分頁切換與最愛面板管理
+// ==========================================
 function switchTab(tab) {
     currentTab = tab;
     const tabSearch = document.getElementById('tab-search');
@@ -606,6 +631,9 @@ function toggleFav(id) {
     handleFilter();
 }
 
+// ==========================================
+// 8. 🚀 智慧聯想選單 (仿 Google 體驗 + 🛑 台北限定過濾網)
+// ==========================================
 initCompass();
 initGPS();
 fetchTaipeiParkingData();
@@ -631,36 +659,46 @@ if (searchInput && autocompleteList) {
 
         debounceTimer = setTimeout(async () => {
             try {
-                // 🎯 核心升級 1：串接全台灣開源地圖，加上 addressdetails=1 開啟詳細門牌路段細節
-                const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=tw&addressdetails=1&limit=6`;
+                // 優先使用「臺北市」前綴請求開源地圖伺服器，並開啟詳細地理欄位
+                const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent('臺北市 ' + query)}&countrycodes=tw&addressdetails=1&limit=10`;
                 const res = await fetch(url);
                 const suggestions = await res.json();
 
                 if (suggestions.length > 0) {
-                    autocompleteList.classList.remove('hidden');
+                    let hasVisibleItems = false;
+                    autocompleteList.innerHTML = '';
                     
+                    // 頂部常駐快速選項
                     const searchAllDiv = document.createElement('div');
                     searchAllDiv.className = 'p-3 hover:bg-blue-50 cursor-pointer border-b border-slate-100 flex items-center gap-3 transition';
                     searchAllDiv.innerHTML = `
                         <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold flex-shrink-0">🔍</div>
-                        <div class="text-sm text-slate-800 font-bold flex-1">搜尋「${query}」周邊車位</div>
+                        <div class="text-sm text-slate-800 font-bold flex-1">搜尋「${query}」台北周邊車位</div>
                     `;
                     searchAllDiv.addEventListener('click', () => { autocompleteList.classList.add('hidden'); searchLocation(); });
                     autocompleteList.appendChild(searchAllDiv);
 
                     suggestions.forEach(place => {
-                        // 🎯 核心升級 2：仿 Google Maps 精準分離店名與灰色地址
-                        const shortName = place.name || place.display_name.split(',')[0];
-                        
                         const addr = place.address || {};
                         const city = addr.city || addr.county || '';
+                        const displayName = place.display_name || '';
+
+                        // 🛑 防火牆過濾：只要不符合台北地區的任何關鍵字，一律就地蒸發！
+                        if (!city.includes('台北') && !city.includes('臺北') && !displayName.includes('台北') && !displayName.includes('臺北')) {
+                            return; 
+                        }
+
+                        // 有台北市資料，開放渲染
+                        hasVisibleItems = true;
+                        const shortName = place.name || displayName.split(',')[0];
+                        
                         const district = addr.suburb || addr.town || addr.village || '';
                         const road = addr.road || '';
                         const housenumber = addr.house_number || '';
                         
                         let detailAddress = `${city}${district}${road}${housenumber}`;
                         if (!detailAddress || detailAddress.length < 3) {
-                            detailAddress = place.display_name.replace(shortName + ', ', '');
+                            detailAddress = displayName.split(',').reverse().join('').trim();
                         }
 
                         const div = document.createElement('div');
@@ -686,13 +724,23 @@ if (searchInput && autocompleteList) {
                         });
                         autocompleteList.appendChild(div);
                     });
+
+                    if (hasVisibleItems) {
+                        autocompleteList.classList.remove('hidden');
+                    } else {
+                        renderNoResults();
+                    }
                 } else {
-                    autocompleteList.innerHTML = `<div class="p-4 text-center text-sm text-slate-400 font-bold">找不到相關地點 😢</div>`;
-                    autocompleteList.classList.remove('hidden');
+                    renderNoResults();
                 }
             } catch (e) { console.error("聯想選單錯誤:", e); }
         }, 400);
     });
+
+    function renderNoResults() {
+        autocompleteList.innerHTML = `<div class="p-4 text-center text-sm text-slate-400 font-bold">在台北地區找不到「${searchInput.value.trim()}」😢<br><span class="text-xs font-normal">請輸入台北市內更具體的店家或地址</span></div>`;
+        autocompleteList.classList.remove('hidden');
+    }
 
     document.addEventListener('click', function(e) {
         if (!searchInput.contains(e.target) && !autocompleteList.contains(e.target)) {
@@ -701,6 +749,9 @@ if (searchInput && autocompleteList) {
     });
 }
 
+// ==========================================
+// 9. 建立搜尋地標與綠色文字膠囊常駐標籤
+// ==========================================
 function createSearchMarker(name, lat, lng, address = "") {
     let currentMap = typeof map !== 'undefined' ? map : myMap;
     if (!currentMap) return;
@@ -716,7 +767,7 @@ function createSearchMarker(name, lat, lng, address = "") {
 
     destMarker = L.marker([lat, lng], { icon: customIcon }).addTo(currentMap);
 
-    // 常駐顯示綠色地名標籤
+    // 🌟 常駐顯示綠色地名標籤膠囊 (圖六效果)
     destMarker.bindTooltip(name, {
         permanent: true,
         direction: 'top',
@@ -725,7 +776,6 @@ function createSearchMarker(name, lat, lng, address = "") {
     });
 
     const searchQuery = address ? `${name} ${address}` : name;
-    // 修正原本網址字串拼錯的 bug
     const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(searchQuery)}`;
 
     const popupContent = `
