@@ -156,12 +156,88 @@ def serve_index():
     return app.send_static_file('index.html')
 
 # =========================================================
-# 🚀 API 端點
+# 🚀 API 端點：精準計算並撈取周邊車位資料
 # =========================================================
 @app.route("/nearby")
 def nearby():
-    # 目前前端測試版改為直連政府 API，此端點保留供未來使用
-    return jsonify({"message": "後端服務正常，目前前端處於直連政府開放資料之測試模式"})
+    lat = request.args.get("lat", type=float)
+    lng = request.args.get("lng", type=float)
+    max_walk = request.args.get("max_walk", type=int, default=999)
+    
+    if lat is None or lng is None:
+        return jsonify({"error": "缺少經緯度參數 lat/lng"}), 400
+
+    try:
+        # 1. 連線到 Aiven 雲端資料庫
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM parking_lots")
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        res = []
+        for r in rows:
+            if r["lat"] is None or r["lng"] is None:
+                continue
+                
+            # 2. 計算目標與資料庫車位的距離與步行時間
+            d = haversine_m(lat, lng, float(r["lat"]), float(r["lng"]))
+            walk_min = walk_time_min(d)
+            
+            # 3. 專題防錯：搜尋半徑設為 15000 公尺（15公里），防止跨區測試查無資料
+            if d <= 15000 and (walk_min is None or walk_min <= max_walk):
+                # 簡單正則解析費率
+                import re
+                text = str(r["payex"] or "").replace(" ", "").replace(",", "")
+                m = re.search(r"(\d+)元", text)
+                price = int(m.group(1)) if m else None
+                if price and ("半小時" in text or "30分" in text or "30分鐘" in text):
+                    price = price * 2
+                
+                # 即時動態客滿預測
+                def quick_predict(avail, total):
+                    if avail is None or total is None: return "無即時連線，無法預測"
+                    if avail <= 0: return "已客滿"
+                    if avail > 50 or (total > 0 and (avail / total) > 0.5): return "車位充足"
+                    return f"⚠️ 預計 {int(avail / 0.3)} 分鐘後客滿"
+
+                res.append({
+                    "id": r["id"], 
+                    "name": r["name"], 
+                    "category": r["category"],
+                    "address": r["address"], 
+                    "lat": float(r["lat"]), 
+                    "lng": float(r["lng"]),
+                    "distance_m": d, 
+                    "walkTimeMin": walk_min, 
+                    "pricePerHour": price,
+                    "structureType": r["structure_type"],
+                    "availablecar": r["available_car"], 
+                    "totalcar": r["total_car"],
+                    "prediction": quick_predict(r["available_car"], r["total_car"])
+                })
+
+        # 4. 進行高精度距離排序（由近到遠）
+        res.sort(key=lambda x: x["distance_m"])
+        nearest = res[0] if res else None
+
+        priced = [r for r in res if r["pricePerHour"]]
+        cheapest = None
+        if priced:
+            priced.sort(key=lambda x: (x["pricePerHour"], x["distance_m"]))
+            cheapest = priced[0]
+
+        # 5. 回傳符合前端 script.js 規格的完整 JSON 資料包
+        return jsonify({
+            "nearby": res[:60],
+            "nearest": nearest,
+            "cheapest": cheapest
+        })
+
+    except Exception as e:
+        print(f"[ERROR] 雲端 API 撈取失敗: {e}")
+        return jsonify({"error": f"資料庫查詢失敗: {str(e)}"}), 500
 
 # =========================================================
 # 🔥 主程式進入點
