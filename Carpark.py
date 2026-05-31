@@ -13,6 +13,10 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from pyproj import Transformer
 from apscheduler.schedulers.background import BackgroundScheduler
+from dotenv import load_dotenv  # 👈 引入 dotenv 套件
+
+# ⚙️ 載入 .env 檔案裡的機密資訊 (本地開發用，雲端會自動讀取系統環境變數)
+load_dotenv()
 
 # ⚙️ 初始化 Flask
 app = Flask(__name__, static_folder='car', static_url_path='/')
@@ -31,7 +35,7 @@ CORS(app, resources={
 # =========================================================
 DB_CONFIG = {
     'user': 'avnadmin',
-    'password': os.environ.get('DB_PASSWORD'), 
+    'password': os.environ.get('DB_PASSWORD'), # 👈 安全讀取資料庫密碼
     'host': 'mysql-14bf0d58-iljsauw-7901.c.aivencloud.com',
     'port': 11576,
     'database': 'defaultdb',
@@ -176,7 +180,7 @@ def nearby():
         return jsonify({"error": str(e)}), 500
 
 # =========================================================
-# 🚀 新增：Google Places API 中轉路由 (供前端智慧聯想選單使用)
+# 🚀 Google Places API 中轉路由 (供前端智慧聯想選單使用)
 # =========================================================
 @app.route("/api/search_places", methods=["GET"])
 def search_places():
@@ -184,8 +188,12 @@ def search_places():
     if not query:
         return jsonify([])
 
-    # 從環境變數讀取，若無則使用預設字串 (請務必換成你真實的 API Key)
-    GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY', 'AIzaSyCCPKxsZVzUGLK41Oq4Vma48gM5Uwh6wwA')
+    # 🛡️ 絕對安全寫法：只從環境變數讀取，不寫死任何預設密碼
+    GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
+    
+    # 加上保護機制：如果雲端沒設定金鑰，直接回報錯誤，避免程式崩潰
+    if not GOOGLE_API_KEY:
+        return jsonify({"error": "伺服器缺少 Google API Key 環境變數，請至 Render 後台設定！"}), 500
 
     # 呼叫 Google Places Text Search API
     url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
@@ -231,7 +239,7 @@ if __name__ == "__main__":
     print("[INFO] ⏱️ 背景自動更新排程已啟動 (每 3 分鐘)")
 
     try:
-        app.run(port=5000, debug=False) 
+        app.run(host='0.0.0.0', port=5000, debug=False) 
     except (KeyboardInterrupt, SystemExit):
         scheduler.shutdown()
         print("[INFO] 🛑 伺服器已關閉")
