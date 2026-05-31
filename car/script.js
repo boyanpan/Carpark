@@ -623,7 +623,7 @@ window.toggleFav = function(id) {
 }
 
 // ==========================================
-// 9. 下拉智慧聯想選單 (搭載智慧退讓與分店命名)
+// 9. 下拉智慧聯想選單 (還原官方真實分店名稱)
 // ==========================================
 function initAutocomplete() {
     const searchInput = document.getElementById('searchInput');
@@ -672,6 +672,8 @@ function initAutocomplete() {
                             }
 
                             hasVisibleItems = true;
+                            
+                            // 🌟 核心修改：移除人工造詞，直接抓取原生地名 (如: 麥當勞-台北舊宗餐廳)
                             let rawName = place.name || displayName.split(',')[0];
                             
                             const district = addr.suburb || addr.town || addr.village || '';
@@ -683,29 +685,16 @@ function initAutocomplete() {
                                 detailAddress = displayName.split(',').reverse().join('').trim();
                             }
 
-                            // 🌟 智慧分店命名器 🌟
-                            let finalTitle = rawName;
-                            const isChain = /(麥當勞|家樂福|星巴克|全聯|7-11|全家|肯德基|摩斯|路易莎|大潤發|好市多|IKEA)/.test(query) || /(麥當勞|家樂福)/.test(rawName);
-
-                            if (isChain) {
-                                let cleanName = rawName.split('-')[0].replace(/餐廳|門市|分店|店|設有得來速|股份有限公司|附設/g, '').trim();
-                                if (road) {
-                                    finalTitle = `${cleanName} (${road}店)`;
-                                } else if (district) {
-                                    finalTitle = `${cleanName} (${district}店)`;
-                                } else {
-                                    finalTitle = cleanName;
-                                }
-                            }
-
                             let finalAddressShow = fallbackMsg ? `<span class="text-amber-500 font-bold">📍 鄰近路段</span> ${detailAddress}` : detailAddress;
 
                             const div = document.createElement('div');
                             div.className = 'p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0 flex items-center gap-3 transition';
+                            
+                            // 上排顯示官方真實名稱，下排顯示詳細地址
                             div.innerHTML = `
                                 <div class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-bold flex-shrink-0">📍</div>
                                 <div class="flex flex-col overflow-hidden flex-1">
-                                    <div class="text-sm text-slate-800 font-bold truncate">${finalTitle}</div>
+                                    <div class="text-sm text-slate-800 font-bold truncate">${rawName}</div>
                                     <div class="text-[11px] text-slate-400 truncate">${finalAddressShow}</div>
                                 </div>
                             `;
@@ -716,7 +705,7 @@ function initAutocomplete() {
                                 searchedLocation = [parseFloat(place.lat), parseFloat(place.lon)];
                                 window.currentKeyword = null; 
                                 
-                                createSearchMarker(finalTitle, searchedLocation[0], searchedLocation[1], detailAddress);
+                                createSearchMarker(rawName, searchedLocation[0], searchedLocation[1], detailAddress);
                                 handleFilter(); 
                                 map.flyTo(searchedLocation, 16, {animate: true, duration: 1.5}); 
                                 collapseBottomSheet();
