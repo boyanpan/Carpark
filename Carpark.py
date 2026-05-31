@@ -13,7 +13,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from pyproj import Transformer
 from apscheduler.schedulers.background import BackgroundScheduler
-from dotenv import load_dotenv  # 👈 引入 dotenv 套件
+from dotenv import load_dotenv
 
 # ⚙️ 載入 .env 檔案裡的機密資訊 (本地開發用，雲端會自動讀取系統環境變數)
 load_dotenv()
@@ -35,7 +35,7 @@ CORS(app, resources={
 # =========================================================
 DB_CONFIG = {
     'user': 'avnadmin',
-    'password': os.environ.get('DB_PASSWORD'), # 👈 安全讀取資料庫密碼
+    'password': os.environ.get('DB_PASSWORD'), # 安全讀取資料庫密碼
     'host': 'mysql-14bf0d58-iljsauw-7901.c.aivencloud.com',
     'port': 11576,
     'database': 'defaultdb',
@@ -143,6 +143,65 @@ def sync_data_to_db():
     except Exception as e:
         print(f"[ERROR] 資料同步失敗: {e}")
 
+# =========================================================
+# 🧠 智慧轉乘決策引擎 (核心商業邏輯)
+# =========================================================
+def calculate_best_transit_mode(distance: float, pure_walk_time: float, yb_data: dict = None, metro_data: dict = None) -> dict:
+    # 預設最佳方案為步行
+    best_mode = 'WALK'
+    best_time = pure_walk_time
+    recommendation_reason = "純步行最為直接便利"
+
+    # 規則一：步行優先法則 (大約 800m 內或 10 分鐘內)
+    if pure_walk_time <= 10 or distance <= 800:
+        return {
+            "mode": "WALK",
+            "total_time": pure_walk_time,
+            "reason": "距離相當近，直接步行前往最有效率🚶"
+        }
+
+    # 規則二：YouBike 真實時間校正
+    total_yb_time = float('inf')
+    if yb_data and yb_data.get('is_valid'):
+        # 步行至起點 ＋ 騎乘 ＋ 終點步行 ＋ 借還車操作緩衝(2分鐘)
+        total_yb_time = yb_data.get('walk_to_start', 0) + yb_data.get('ride_time', 0) + yb_data.get('walk_from_end', 0) + 2
+
+    # 規則三：捷運轉乘長途限制
+    total_metro_time = float('inf')
+    if distance > 2000 and metro_data and metro_data.get('is_valid'):
+        # 步行至起站 ＋ 乘車 ＋ 終點步行 ＋ 進出站等候緩衝(5分鐘)
+        total_metro_time = metro_data.get('walk_to_start', 0) + metro_data.get('ride_time', 0) + metro_data.get('walk_from_end', 0) + 5
+
+    # 🏆 競速比較
+    if total_yb_time < best_time:
+        best_mode = 'YOUBIKE'
+        best_time = total_yb_time
+        recommendation_reason = "騎乘 YouBike 可大幅縮短移動時間🚴"
+        
+    if total_metro_time < best_time:
+        best_mode = 'METRO'
+        best_time = total_metro_time
+        recommendation_reason = "長途移動，搭乘大眾運輸最節省時間🚇"
+
+    # 規則四：轉乘防呆與最小效益閾值 (只省不到 3 分鐘就不值得折騰)
+    if best_mode != 'WALK':
+        time_saved = pure_walk_time - best_time
+        if time_saved <= 3:
+            return {
+                "mode": "WALK",
+                "total_time": pure_walk_time,
+                "reason": f"轉乘雖然快了 {int(time_saved)} 分鐘，但考量借還車流程，建議直接步行🚶"
+            }
+
+    return {
+        "mode": best_mode,
+        "total_time": int(best_time), # 回傳整數分鐘數
+        "reason": recommendation_reason
+    }
+
+# =========================================================
+# 🌐 API 路由區塊
+# =========================================================
 @app.route("/")
 def serve_index():
     return app.send_static_file('index.html')
@@ -179,26 +238,17 @@ def nearby():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# =========================================================
-# 🚀 Google Places API 中轉路由 (供前端智慧聯想選單使用)
-# =========================================================
 @app.route("/api/search_places", methods=["GET"])
 def search_places():
     query = request.args.get('q')
     if not query:
         return jsonify([])
 
-    # 🛡️ 絕對安全寫法：只從環境變數讀取，不寫死任何預設密碼
     GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
-    
-    # 加上保護機制：如果雲端沒設定金鑰，直接回報錯誤，避免程式崩潰
     if not GOOGLE_API_KEY:
-        return jsonify({"error": "伺服器缺少 Google API Key 環境變數，請至 Render 後台設定！"}), 500
+        return jsonify({"error": "伺服器缺少 Google API Key 環境變數"}), 500
 
-    # 呼叫 Google Places Text Search API
     url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
-    
-    # 鎖定台北市周邊與繁體中文
     params = {
         'query': f"{query} 台北",
         'language': 'zh-TW',
@@ -211,20 +261,34 @@ def search_places():
         data = response.json()
 
         results = []
-        # 只擷取前 6 筆精準資料回傳前端
         for place in data.get('results', [])[:6]: 
-            # 整理資料格式，去除地址字串中的「台灣」贅字
             address = place.get('formatted_address', '').replace('台灣', '').strip()
-            
             results.append({
                 'name': place.get('name'), 
                 'address': address,
                 'lat': place['geometry']['location']['lat'],
                 'lng': place['geometry']['location']['lng']
             })
-            
         return jsonify(results)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# 🚀 專門給前端呼叫的「智慧轉乘決策 API」
+@app.route("/api/recommend_transit", methods=["POST"])
+def recommend_transit():
+    try:
+        data = request.json or {}
         
+        # 取得前端傳來的數據
+        distance = data.get('distance', 0)
+        pure_walk_time = data.get('pure_walk_time', 0)
+        yb_data = data.get('yb_data', None)
+        metro_data = data.get('metro_data', None)
+
+        # 呼叫核心大腦進行運算
+        decision = calculate_best_transit_mode(distance, pure_walk_time, yb_data, metro_data)
+        
+        return jsonify(decision)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
