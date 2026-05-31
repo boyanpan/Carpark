@@ -17,7 +17,7 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r
 const markerCluster = L.markerClusterGroup({ chunkedLoading: true, disableClusteringAtZoom: 16, maxClusterRadius: 60 });
 map.addLayer(markerCluster);
 
-let parkingData = []; // 存放雲端拿回來的資料
+let parkingData = []; 
 let userLocation = null, previousLocation = null, currentHeading = 0, hasCompass = false;
 let userMarker = null, searchedLocation = null, destMarker = null, radiusCircle = null;
 let routingControl = null, isNavigating = false, currentDestination = null, currentTab = 'search';
@@ -216,63 +216,18 @@ function smartMatch(targetStr, queryStr) {
 }
 
 // ==========================================
-// 🚀 終極智慧查詢引擎：解決門牌號碼與連鎖店贅字問題
-// ==========================================
-async function fetchOSMWithFallback(queryStr, limit = 1) {
-    const fetchAPI = async (q) => {
-        let mapQuery = q;
-        if (!mapQuery.includes('台北') && !mapQuery.includes('臺北')) mapQuery = '臺北市 ' + mapQuery;
-        // 加入 viewbox 限縮台北市邊界
-        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(mapQuery)}&countrycodes=tw&addressdetails=1&viewbox=121.43,25.21,121.67,24.96&bounded=1&limit=${limit}`;
-        const res = await fetch(url, { headers: { 'Accept-Language': 'zh-TW,zh;q=0.9' } });
-        return await res.json();
-    };
-
-    // 1️⃣ 第一層：精確搜尋 (原音重現)
-    let data = await fetchAPI(queryStr);
-    if (data.length > 0) return { data, fallbackMsg: null };
-
-    // 2️⃣ 第二層：連鎖店贅字淨化 (例: 麥當勞-台北舊宗餐廳-設有得來速 -> 麥當勞 台北舊宗)
-    if (queryStr.includes('-') || queryStr.includes('餐廳') || queryStr.includes('店')) {
-        let cleanChain = queryStr.replace(/-/g, ' ').replace(/餐廳|門市|分店|店|設有得來速|股份有限公司/g, '').trim();
-        if (cleanChain) {
-            data = await fetchAPI(cleanChain);
-            if (data.length > 0) return { data, fallbackMsg: "已為您定位至該品牌鄰近位置" };
-        }
-        // 退讓到只搜品牌主體
-        let brandOnly = queryStr.split('-')[0].trim();
-        if (brandOnly) {
-            data = await fetchAPI(brandOnly);
-            if (data.length > 0) return { data, fallbackMsg: "已為您定位至該品牌鄰近位置" };
-        }
-    }
-
-    // 3️⃣ 第三層：精確門牌號碼退讓 (例: 中山北路三段34號 -> 中山北路三段)
-    if (/\d+\s*[號樓Ff]/.test(queryStr)) {
-        let streetOnly = queryStr.replace(/\d+\s*[號之-]\s*\d+\s*[樓室Ff區]?/g, '').replace(/\d+\s*[號樓室Ff]/g, '').trim();
-        if (streetOnly) {
-            data = await fetchAPI(streetOnly);
-            if (data.length > 0) return { data, fallbackMsg: "門牌未收錄，已為您定位至該路段" };
-        }
-    }
-
-    return { data: [], fallbackMsg: null };
-}
-
-// ==========================================
-// 4. 🔥 核心：從 Render/Aiven 撈取資料
+// 4. 🔥 核心：從 Render/Aiven 撈取車位資料
 // ==========================================
 async function fetchTaipeiParkingData() {
     try {
         const listEl = document.getElementById('content-list');
-        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">📡 正在從 Aiven 雲端讀取即時車位...</div>`;
+        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">📡 正在從雲端讀取即時車位...</div>`;
         
         const res = await fetch(`${API_BASE_URL}/nearby`);
         if (!res.ok) throw new Error("伺服器回應錯誤");
         
         const result = await res.json();
         
-        // 轉換後端格式給前端使用
         parkingData = (result.nearby || []).map(p => {
             const availCar = p.availablecar !== null ? p.availablecar : -1;
             return {
@@ -290,7 +245,7 @@ async function fetchTaipeiParkingData() {
             };
         });
 
-        console.log(`成功從雲端載入 ${parkingData.length} 筆資料。`);
+        console.log(`成功載入 ${parkingData.length} 筆資料。`);
         handleFilter();
     } catch (err) {
         console.error("雲端資料讀取失敗:", err);
@@ -300,7 +255,21 @@ async function fetchTaipeiParkingData() {
 }
 
 // ==========================================
-// 5. 搜尋功能 (搭載智慧退讓引擎)
+// 🌟 核心：向自己的後端請求 Google 地圖資料
+// ==========================================
+async function fetchGooglePlacesFromBackend(queryStr) {
+    try {
+        const res = await fetch(`${API_BASE_URL}/api/search_places?q=${encodeURIComponent(queryStr)}`);
+        if (!res.ok) throw new Error("後端請求失敗");
+        return await res.json();
+    } catch (err) {
+        console.error("無法取得 Google 圖資:", err);
+        return [];
+    }
+}
+
+// ==========================================
+// 5. 搜尋功能 (串接 Google API 版)
 // ==========================================
 async function searchLocation() {
     const queryInput = document.getElementById('searchInput');
@@ -309,6 +278,7 @@ async function searchLocation() {
     
     collapseBottomSheet();
 
+    // 1. 先在現有停車場資料庫內比對
     let localMatches = parkingData.filter(p => 
         smartMatch(p.name, rawQuery) || smartMatch(p.destName, rawQuery) || smartMatch(p.address, rawQuery) || smartMatch(p.category, rawQuery)
     );
@@ -325,47 +295,26 @@ async function searchLocation() {
         return; 
     }
 
+    // 2. 如果內部沒找到，向 Google 請求位置
     window.currentKeyword = null; 
-    if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">🌍 正在台北地區搜尋「${rawQuery}」...</div>`;
+    if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">🌍 正在 Google 地圖搜尋「${rawQuery}」...</div>`;
     
     try {
-        const { data, fallbackMsg } = await fetchOSMWithFallback(rawQuery, 1);
+        const data = await fetchGooglePlacesFromBackend(rawQuery);
         
-        if (data.length > 0) {
-            const addr = data[0].address || {};
-            const city = addr.city || addr.county || '';
-            const displayName = data[0].display_name || '';
-
-            if (!city.includes('台北') && !city.includes('臺北') && !displayName.includes('台北') && !displayName.includes('臺北')) {
-                if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">搜尋失敗<br><span class="text-xs text-slate-400">「${rawQuery}」不屬於台北地區！</span></div>`;
-                return;
-            }
-
-            searchedLocation = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+        if (data && data.length > 0) {
+            const place = data[0]; // 直接取最符合的第一筆
+            searchedLocation = [parseFloat(place.lat), parseFloat(place.lng)];
             
-            const district = addr.suburb || addr.town || addr.village || '';
-            const road = addr.road || '';
-            const housenumber = addr.house_number || '';
-            let detailAddress = `${city}${district}${road}${housenumber}`;
-            if (!detailAddress || detailAddress.length < 3) {
-                detailAddress = displayName.split(',').reverse().join('').trim();
-            }
-
-            let markerName = rawQuery;
-            let displayAddress = detailAddress;
-            if (fallbackMsg) {
-                displayAddress = `(${fallbackMsg}) ${detailAddress}`;
-            }
-
-            createSearchMarker(markerName, searchedLocation[0], searchedLocation[1], displayAddress);
+            createSearchMarker(place.name, searchedLocation[0], searchedLocation[1], place.address);
             handleFilter(); 
             map.flyTo(searchedLocation, 16, {animate: true, duration: 1.5}); 
             collapseBottomSheet();
         } else {
-            if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">在台北市找不到「${rawQuery}」<br><span class="text-xs text-slate-400">請輸入台北市內更具體的名字或路段</span></div>`;
+            if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">找不到「${rawQuery}」<br><span class="text-xs text-slate-400">請嘗試輸入更具體的名稱</span></div>`;
         }
     } catch (err) { 
-        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500">搜尋失敗</div>`; 
+        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500">搜尋失敗，請稍後再試</div>`; 
     }
 }
 
@@ -623,7 +572,7 @@ window.toggleFav = function(id) {
 }
 
 // ==========================================
-// 9. 下拉智慧聯想選單 (搭載智慧分店名稱合成邏輯)
+// 9. 下拉智慧聯想選單 (串接 Google API 版)
 // ==========================================
 function initAutocomplete() {
     const searchInput = document.getElementById('searchInput');
@@ -645,113 +594,55 @@ function initAutocomplete() {
             autocompleteList.innerHTML = '';
             if (!query) { autocompleteList.classList.add('hidden'); return; }
 
+            // 延長防抖時間至 500ms，減少對 Google API 的頻繁呼叫
             debounceTimer = setTimeout(async () => {
-                try {
-                    const { data: suggestions, fallbackMsg } = await fetchOSMWithFallback(query, 6);
+                const suggestions = await fetchGooglePlacesFromBackend(query);
 
-                    if (suggestions.length > 0) {
-                        let hasVisibleItems = false;
-                        autocompleteList.innerHTML = '';
+                if (suggestions && suggestions.length > 0) {
+                    autocompleteList.innerHTML = '';
+                    
+                    const searchAllDiv = document.createElement('div');
+                    searchAllDiv.className = 'p-3 hover:bg-blue-50 cursor-pointer border-b border-slate-100 flex items-center gap-3 transition';
+                    searchAllDiv.innerHTML = `
+                        <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold flex-shrink-0">🔍</div>
+                        <div class="text-sm text-slate-800 font-bold flex-1">搜尋「${query}」台北周邊車位</div>
+                    `;
+                    searchAllDiv.addEventListener('click', () => { autocompleteList.classList.add('hidden'); searchLocation(); });
+                    autocompleteList.appendChild(searchAllDiv);
+
+                    suggestions.forEach(place => {
+                        const div = document.createElement('div');
+                        div.className = 'p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0 flex items-center gap-3 transition';
                         
-                        const searchAllDiv = document.createElement('div');
-                        searchAllDiv.className = 'p-3 hover:bg-blue-50 cursor-pointer border-b border-slate-100 flex items-center gap-3 transition';
-                        searchAllDiv.innerHTML = `
-                            <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold flex-shrink-0">🔍</div>
-                            <div class="text-sm text-slate-800 font-bold flex-1">搜尋「${query}」台北周邊車位</div>
+                        div.innerHTML = `
+                            <div class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-bold flex-shrink-0">📍</div>
+                            <div class="flex flex-col overflow-hidden flex-1">
+                                <div class="text-sm text-slate-800 font-bold truncate">${place.name}</div>
+                                <div class="text-[11px] text-slate-400 truncate">${place.address}</div>
+                            </div>
                         `;
-                        searchAllDiv.addEventListener('click', () => { autocompleteList.classList.add('hidden'); searchLocation(); });
-                        autocompleteList.appendChild(searchAllDiv);
-
-                        suggestions.forEach(place => {
-                            const addr = place.address || {};
-                            const city = addr.city || addr.county || '';
-                            const displayName = place.display_name || '';
-
-                            if (!city.includes('台北') && !city.includes('臺北') && !displayName.includes('台北') && !displayName.includes('臺北')) {
-                                return; 
-                            }
-
-                            hasVisibleItems = true;
+                        
+                        div.addEventListener('click', () => {
+                            searchInput.value = place.name; 
+                            autocompleteList.classList.add('hidden'); 
+                            searchedLocation = [parseFloat(place.lat), parseFloat(place.lng)];
+                            window.currentKeyword = null; 
                             
-                            // 🌟 核心修改：抓取原生地名
-                            let rawName = place.name || displayName.split(',')[0];
-                            
-                            const district = addr.suburb || addr.town || addr.village || '';
-                            const road = addr.road || '';
-                            const housenumber = addr.house_number || '';
-
-                            // 💡 智慧分店名稱合成邏輯 (Workaround)
-                            // 當開源資料庫沒有提供分店名稱時，利用「路名」或「行政區」動態生成
-                            if (!/店|餐廳|門市/.test(rawName) && rawName.length <= 15) {
-                                let branchSuffix = "";
-                                if (road) {
-                                    // 將「桂林路」截斷成「桂林」
-                                    let shortRoad = road.split(/[路街巷段]/)[0]; 
-                                    branchSuffix = shortRoad ? `${shortRoad}店` : "";
-                                } else if (district) {
-                                    // 如果沒有路名，退而求其次用行政區
-                                    branchSuffix = `${district.replace('區', '')}店`;
-                                }
-
-                                if (branchSuffix) {
-                                    if (rawName.includes("麥當勞")) {
-                                        let shortRoad = road ? road.split(/[路街]/)[0] : "";
-                                        rawName = `${rawName}-${district.replace('區', '')}${shortRoad}餐廳`;
-                                    } else {
-                                        rawName = `${rawName} ${branchSuffix}`;
-                                    }
-                                }
-                            }
-                            
-                            let detailAddress = `${city}${district}${road}${housenumber}`;
-                            if (!detailAddress || detailAddress.length < 3) {
-                                detailAddress = displayName.split(',').reverse().join('').trim();
-                            }
-
-                            let finalAddressShow = fallbackMsg ? `<span class="text-amber-500 font-bold">📍 鄰近路段</span> ${detailAddress}` : detailAddress;
-
-                            const div = document.createElement('div');
-                            div.className = 'p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0 flex items-center gap-3 transition';
-                            
-                            // 上排顯示合成後的官方名稱，下排顯示詳細地址
-                            div.innerHTML = `
-                                <div class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-bold flex-shrink-0">📍</div>
-                                <div class="flex flex-col overflow-hidden flex-1">
-                                    <div class="text-sm text-slate-800 font-bold truncate">${rawName}</div>
-                                    <div class="text-[11px] text-slate-400 truncate">${finalAddressShow}</div>
-                                </div>
-                            `;
-                            
-                            div.addEventListener('click', () => {
-                                searchInput.value = rawName; 
-                                autocompleteList.classList.add('hidden'); 
-                                searchedLocation = [parseFloat(place.lat), parseFloat(place.lon)];
-                                window.currentKeyword = null; 
-                                
-                                createSearchMarker(rawName, searchedLocation[0], searchedLocation[1], detailAddress);
-                                handleFilter(); 
-                                map.flyTo(searchedLocation, 16, {animate: true, duration: 1.5}); 
-                                collapseBottomSheet();
-                            });
-                            autocompleteList.appendChild(div);
+                            createSearchMarker(place.name, searchedLocation[0], searchedLocation[1], place.address);
+                            handleFilter(); 
+                            map.flyTo(searchedLocation, 16, {animate: true, duration: 1.5}); 
+                            collapseBottomSheet();
                         });
+                        autocompleteList.appendChild(div);
+                    });
 
-                        if (hasVisibleItems) {
-                            autocompleteList.classList.remove('hidden');
-                        } else {
-                            renderNoResults();
-                        }
-                    } else {
-                        renderNoResults();
-                    }
-                } catch (e) { console.error("聯想選單錯誤:", e); }
-            }, 400);
+                    autocompleteList.classList.remove('hidden');
+                } else {
+                    autocompleteList.innerHTML = `<div class="p-4 text-center text-sm text-slate-400 font-bold">找不到「${query}」😢<br><span class="text-xs font-normal">請嘗試輸入更精確的名稱</span></div>`;
+                    autocompleteList.classList.remove('hidden');
+                }
+            }, 500); 
         });
-
-        function renderNoResults() {
-            autocompleteList.innerHTML = `<div class="p-4 text-center text-sm text-slate-400 font-bold">在台北地區找不到「${searchInput.value.trim()}」😢<br><span class="text-xs font-normal">請輸入更具體的路段或名稱</span></div>`;
-            autocompleteList.classList.remove('hidden');
-        }
 
         document.addEventListener('click', function(e) {
             if (!searchInput.contains(e.target) && !autocompleteList.contains(e.target)) {

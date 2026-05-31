@@ -175,6 +175,51 @@ def nearby():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# =========================================================
+# 🚀 新增：Google Places API 中轉路由 (供前端智慧聯想選單使用)
+# =========================================================
+@app.route("/api/search_places", methods=["GET"])
+def search_places():
+    query = request.args.get('q')
+    if not query:
+        return jsonify([])
+
+    # 從環境變數讀取，若無則使用預設字串 (請務必換成你真實的 API Key)
+    GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY', 'AIzaSyCCPKxsZVzUGLK41Oq4Vma48gM5Uwh6wwA')
+
+    # 呼叫 Google Places Text Search API
+    url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+    
+    # 鎖定台北市周邊與繁體中文
+    params = {
+        'query': f"{query} 台北",
+        'language': 'zh-TW',
+        'region': 'tw',
+        'key': GOOGLE_API_KEY
+    }
+
+    try:
+        response = requests.get(url, params=params)
+        data = response.json()
+
+        results = []
+        # 只擷取前 6 筆精準資料回傳前端
+        for place in data.get('results', [])[:6]: 
+            # 整理資料格式，去除地址字串中的「台灣」贅字
+            address = place.get('formatted_address', '').replace('台灣', '').strip()
+            
+            results.append({
+                'name': place.get('name'), 
+                'address': address,
+                'lat': place['geometry']['location']['lat'],
+                'lng': place['geometry']['location']['lng']
+            })
+            
+        return jsonify(results)
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == "__main__":
     init_db()          
     load_metro_data()  
