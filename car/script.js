@@ -430,7 +430,7 @@ function renderMapMarkers(data) {
         const displayNum = item.car.a < 0 ? '?' : item.car.a;
 
         const textStr = String(displayNum);
-        let iconWidth = 24;       
+        let iconWidth = 24;        
         if (textStr.length === 2) iconWidth = 30; 
         if (textStr.length >= 3) iconWidth = 38;  
         const iconHeight = 24;
@@ -623,7 +623,7 @@ window.toggleFav = function(id) {
 }
 
 // ==========================================
-// 9. 下拉智慧聯想選單 (還原官方真實分店名稱)
+// 9. 下拉智慧聯想選單 (搭載智慧分店名稱合成邏輯)
 // ==========================================
 function initAutocomplete() {
     const searchInput = document.getElementById('searchInput');
@@ -673,12 +673,35 @@ function initAutocomplete() {
 
                             hasVisibleItems = true;
                             
-                            // 🌟 核心修改：移除人工造詞，直接抓取原生地名 (如: 麥當勞-台北舊宗餐廳)
+                            // 🌟 核心修改：抓取原生地名
                             let rawName = place.name || displayName.split(',')[0];
                             
                             const district = addr.suburb || addr.town || addr.village || '';
                             const road = addr.road || '';
                             const housenumber = addr.house_number || '';
+
+                            // 💡 智慧分店名稱合成邏輯 (Workaround)
+                            // 當開源資料庫沒有提供分店名稱時，利用「路名」或「行政區」動態生成
+                            if (!/店|餐廳|門市/.test(rawName) && rawName.length <= 15) {
+                                let branchSuffix = "";
+                                if (road) {
+                                    // 將「桂林路」截斷成「桂林」
+                                    let shortRoad = road.split(/[路街巷段]/)[0]; 
+                                    branchSuffix = shortRoad ? `${shortRoad}店` : "";
+                                } else if (district) {
+                                    // 如果沒有路名，退而求其次用行政區
+                                    branchSuffix = `${district.replace('區', '')}店`;
+                                }
+
+                                if (branchSuffix) {
+                                    if (rawName.includes("麥當勞")) {
+                                        let shortRoad = road ? road.split(/[路街]/)[0] : "";
+                                        rawName = `${rawName}-${district.replace('區', '')}${shortRoad}餐廳`;
+                                    } else {
+                                        rawName = `${rawName} ${branchSuffix}`;
+                                    }
+                                }
+                            }
                             
                             let detailAddress = `${city}${district}${road}${housenumber}`;
                             if (!detailAddress || detailAddress.length < 3) {
@@ -690,7 +713,7 @@ function initAutocomplete() {
                             const div = document.createElement('div');
                             div.className = 'p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0 flex items-center gap-3 transition';
                             
-                            // 上排顯示官方真實名稱，下排顯示詳細地址
+                            // 上排顯示合成後的官方名稱，下排顯示詳細地址
                             div.innerHTML = `
                                 <div class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-bold flex-shrink-0">📍</div>
                                 <div class="flex flex-col overflow-hidden flex-1">
