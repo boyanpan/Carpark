@@ -240,32 +240,24 @@ async function fetchTaipeiParkingData() {
 
         parkingData = (result.nearby || []).map((p, index) => {
             const availCar = p.availablecar !== null ? p.availablecar : -1;
-            
-            // 💡 修正邏輯：根據「真實距離」來分派交通工具，不亂數瞎猜！
             let mockTransit = null;
             let distToDest = 999;
             
-            // 找出停車場與目的地的真實距離
             if (searchedLocation) {
                 distToDest = calculateDistance(searchedLocation[0], searchedLocation[1], p.lat, p.lng);
             } else if (userLocation) {
                 distToDest = calculateDistance(userLocation[0], userLocation[1], p.lat, p.lng);
             } else {
-                // 如果都沒有，預設以台北101為中心算假距離，確保系統不會報錯
                 distToDest = calculateDistance(25.0339, 121.5644, p.lat, p.lng);
             }
 
-            // 🧠 四大規則智慧判斷 (前端模擬版)
             if (distToDest <= 0.8) {
-                // 距離小於 800m：強制走路 (時速約 4.8km/h -> 每分鐘走 80m)
                 const walkTime = Math.max(1, Math.ceil((distToDest * 1000) / 80));
                 mockTransit = { mode: 'walk', time: walkTime, desc: '符合步行優先法則，直接走最快！' };
             } else if (distToDest <= 2.5) {
-                // 距離 800m ~ 2.5km：YouBike 甜蜜點 (時速約 12km/h -> 每分鐘騎 200m，外加 4 分鐘找車緩衝)
                 const bikeTime = Math.max(5, Math.ceil((distToDest * 1000) / 200) + 4);
                 mockTransit = { mode: 'youbike', time: bikeTime, desc: '步行2分 → 騎乘YouBike → 步行2分' };
             } else {
-                // 距離 2.5km 以上：長途轉乘捷運或公車
                 const transitTime = Math.max(10, Math.ceil((distToDest * 1000) / 400) + 8);
                 if (index % 2 === 0) {
                     mockTransit = { mode: 'mrt', time: transitTime, desc: '步行至捷運站 → 乘車 → 出站步行' };
@@ -291,7 +283,7 @@ async function fetchTaipeiParkingData() {
                 prediction: availCar <= 0 ? (availCar < 0 ? "無預測資料" : "已客滿") : "車位充足",
                 car: { t: p.totalcar || 0, a: availCar },
                 left: Math.max(0, availCar),
-                transit: p.transit || mockTransit // 優先吃後端，後端沒給就吃算好的聰明假資料
+                transit: p.transit || mockTransit 
             };
         });
         console.log(`成功載入 ${parkingData.length} 筆資料。`);
@@ -315,7 +307,7 @@ async function fetchGooglePlacesFromBackend(queryStr) {
 }
 
 // ==========================================
-// 5. 搜尋功能 (串接 Google API 版)
+// 5. 搜尋功能
 // ==========================================
 async function searchLocation() {
     const queryInput = document.getElementById('searchInput');
@@ -375,7 +367,7 @@ function clearSearchAndLocate() {
 }
 
 // ==========================================
-// 6. 排序與過濾核心（支援距離近與費率划算雙模式排序）
+// 6. 排序與過濾核心
 // ==========================================
 window.changeSortMode = function() {
     const sortSelect = document.getElementById('sortSelect');
@@ -436,6 +428,26 @@ function handleFilter() {
     renderList(data.slice(0, 60), !!searchedLocation); 
 }
 
+// 🌟 新增：點擊地圖時，尋找對應卡片並加上藍框、置中滾動的功能
+window.highlightCardInList = function(id) {
+    const targetCard = document.getElementById(`card-${id}`);
+    if (targetCard) {
+        // 清除所有卡片的藍色框框
+        document.querySelectorAll('.parking-card').forEach(card => card.classList.remove('top-card'));
+        
+        // 幫目標卡片加上藍色框框
+        targetCard.classList.add('top-card');
+        
+        // 讓列表自動滾動到該卡片的位置 (置中顯示)
+        targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        
+        // 如果在手機版，且列表被收起來了，就自動展開它讓你看到卡片
+        if (window.innerWidth < 768 && !isSheetExpanded) {
+            toggleBottomSheet();
+        }
+    }
+};
+
 function renderMapMarkers(data) {
     markerCluster.clearLayers();
     const markers = [];
@@ -490,6 +502,12 @@ function renderMapMarkers(data) {
                 </button>
             </div>
         `);
+
+        // 🌟 新增：當點擊地圖上的地標時，呼叫我們剛寫好的反向連動功能
+        marker.on('click', () => {
+            highlightCardInList(item.id);
+        });
+
         markers.push(marker);
     });
     markerCluster.addLayers(markers);
@@ -654,7 +672,7 @@ window.toggleFav = function(id) {
 }
 
 // ==========================================
-// 9. 下拉智慧聯想選單 (串接 Google API 版)
+// 9. 下拉智慧聯想選單
 // ==========================================
 function initAutocomplete() {
     const searchInput = document.getElementById('searchInput');
@@ -734,7 +752,7 @@ function initAutocomplete() {
 }
 
 // ==========================================
-// 10. 建立搜尋地標與綠色文字膠囊常駐標籤
+// 10. 建立搜尋地標與常駐標籤
 // ==========================================
 function createSearchMarker(name, lat, lng, address = "") {
     if (destMarker) map.removeLayer(destMarker);
@@ -771,7 +789,7 @@ function createSearchMarker(name, lat, lng, address = "") {
 }
 
 // ==========================================
-// 11. 智慧轉乘推薦 UI 引擎 (支援：步行、YouBike、捷運、公車)
+// 11. 智慧轉乘推薦 UI 引擎
 // ==========================================
 function buildSmartTransitBadge(item) {
     if (!item || !item.transit) return '';
