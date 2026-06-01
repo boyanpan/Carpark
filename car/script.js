@@ -451,6 +451,9 @@ function renderMapMarkers(data) {
             return `<div class="flex justify-between items-center border-b border-slate-100 py-1.5 last:border-0"><span class="text-slate-600 font-bold text-xs flex items-center gap-1.5"><span class="text-sm">${icon}</span> ${label}</span><span class="font-mono text-xs"><span class="font-black ${textCol}">${isNoData ? '無即時' : d.a}</span> <span class="text-slate-400 font-medium">/ ${d.t}</span></span></div>`;
         };
 
+        // 💡 準備傳遞給導航的資料
+        const safeItemStr = encodeURIComponent(JSON.stringify(item));
+
         marker.bindPopup(`
             <div class="p-3.5 min-w-[240px] bg-white">
                 <div class="flex justify-between items-start mb-1 pr-4">
@@ -465,7 +468,12 @@ function renderMapMarkers(data) {
      
                 <div class="bg-yellow-50 text-yellow-700 text-[10px] font-bold p-2.5 rounded-lg border border-yellow-100 mb-2 text-center shadow-sm">🤖 ${item.prediction}</div>
                 ${buildSmartTransitBadge(item)}
-                <div class="text-slate-700 text-[10px] bg-slate-50 p-2 rounded-md border border-slate-100 leading-relaxed whitespace-pre-line shadow-sm max-h-[120px] overflow-y-auto no-scrollbar mt-2">💰 ${item.payex}</div>
+                
+                <div class="text-slate-700 text-[10px] bg-slate-50 p-2 rounded-md border border-slate-100 leading-relaxed whitespace-pre-line shadow-sm max-h-[120px] overflow-y-auto no-scrollbar mt-2 mb-3">💰 ${item.payex}</div>
+                
+                <button onclick="startNav('${safeItemStr}')" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-xs font-black shadow-md active:scale-95 transition flex items-center justify-center gap-1.5">
+                    🧭 開始導航
+                </button>
             </div>
         `);
         markers.push(marker);
