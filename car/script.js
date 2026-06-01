@@ -411,6 +411,7 @@ function renderMapMarkers(data) {
                     ${buildRow('🚗', '汽車', item.car)}
                 </div>
                 <div class="bg-yellow-50 text-yellow-700 text-[10px] font-bold p-2.5 rounded-lg border border-yellow-100 mb-2 text-center shadow-sm">🤖 ${item.prediction}</div>
+                ${buildSmartTransitBadge(item)}
                 <div class="text-slate-700 text-[10px] bg-slate-50 p-2 rounded-md border border-slate-100 leading-relaxed whitespace-pre-line shadow-sm max-h-[120px] overflow-y-auto no-scrollbar">💰 ${item.payex}</div>
             </div>
         `);
@@ -450,6 +451,7 @@ function renderList(data, isUsingDest) {
                             <span class="text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm flex items-center gap-1 ${colorClass}">🚗 汽車 <span class="opacity-90">${hasNoData ? '?' : item.car.a}/${item.car.t}</span></span>
                         </div>
                         <p class="text-[9px] text-blue-500 font-bold font-mono bg-blue-50 inline-block px-1.5 py-0.5 rounded">${distLabel} ${distStr}</p>
+                        ${buildSmartTransitBadge(item)}
                     </div>
                     <div class="flex flex-col items-end gap-2.5 shrink-0">
                         <button onclick="toggleFav('${item.id}')" class="text-xl active:scale-75 transition">${isFav ? '🩷' : '🤍'}</button>
@@ -693,6 +695,62 @@ function createSearchMarker(name, lat, lng, address = "") {
     destMarker.bindPopup(popupContent, { closeButton: true, offset: L.point(0, -30) });
     map.panTo([lat, lng]);
 }
+
+// ==========================================
+// 11. 最後一哩路：智慧轉乘推薦 UI 引擎 (對接後端四大規則)
+// ==========================================
+
+/**
+ * 產生智慧轉乘推薦標籤
+ * 預期後端在 parkingData (item) 中提供 `transit` 物件，例如：
+ * item.transit = { 
+ * mode: 'walk' | 'youbike' | 'mrt', // 交通方式
+ * time: 8,                          // 總花費時間(分鐘)
+ * desc: '距離 600m'                 // 補充說明(如：需步行至 OOO 站)
+ * }
+ */
+function buildSmartTransitBadge(item) {
+    // 若後端尚未回傳或該車位無轉乘資料，則不渲染
+    if (!item || !item.transit) return '';
+
+    let icon = '🚶';
+    let label = '直接步行';
+    let colorClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+
+    // 根據後端決策邏輯切換樣式
+    switch (item.transit.mode) {
+        case 'walk':
+            icon = '🚶';
+            label = '直接步行';
+            colorClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+            break;
+        case 'youbike':
+            icon = '🚲';
+            label = 'YouBike 轉乘';
+            colorClass = 'bg-orange-50 text-orange-700 border-orange-200';
+            break;
+        case 'mrt':
+            icon = '🚇';
+            label = '捷運轉乘';
+            colorClass = 'bg-blue-50 text-blue-700 border-blue-200';
+            break;
+    }
+
+    return `
+        <div class="mt-2.5 flex items-center gap-1.5 ${colorClass} border px-2.5 py-1.5 rounded-lg shadow-sm w-fit transition-all hover:scale-[1.02]">
+            <span class="text-sm shadow-sm">${icon}</span>
+            <div class="flex flex-col">
+                <div class="flex items-baseline gap-1.5">
+                    <span class="text-[11px] font-black tracking-wide">${label}</span>
+                    <span class="text-[12px] font-black font-mono">約 ${item.transit.time} 分</span>
+                </div>
+                <span class="text-[9px] font-bold opacity-75 mt-[1px]">${item.transit.desc}</span>
+            </div>
+        </div>
+    `;
+}
+
+
 
 // 系統啟動
 initCompass();
