@@ -6,7 +6,6 @@ proj4.defs("EPSG:3826", "+proj=tmerc +lat_0=0 +lon_0=121 +k=0.9999 +x_0=250000 +
 // ==========================================
 // 1. 初始化地圖與全域變數
 // ==========================================
-// 🎯 智慧連線：本地開發連本地，上到 Render 連 Render
 const API_BASE_URL = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') 
     ? "http://127.0.0.1:5000" 
     : window.location.origin;
@@ -22,6 +21,9 @@ let userLocation = null, previousLocation = null, currentHeading = 0, hasCompass
 let userMarker = null, searchedLocation = null, destMarker = null, radiusCircle = null;
 let routingControl = null, isNavigating = false, currentDestination = null, currentTab = 'search';
 let favorites = JSON.parse(localStorage.getItem('p_favs')) || [];
+
+// ✨ 智慧排序模式全域變數
+let currentSortMode = 'distance';
 
 // UI 元件
 const bottomSheet = document.getElementById('bottom-sheet');
@@ -196,9 +198,6 @@ function getBearing(lat1, lon1, lat2, lon2) {
     return (Math.atan2(y, x) * toDeg + 360) % 360;
 }
 
-// ==========================================
-// 💡 文字標準化與智能比對 
-// ==========================================
 function normalizeText(str) {
     if (!str) return "";
     return str.replace(/台/g, '臺').trim().toLowerCase();
@@ -220,7 +219,7 @@ function smartMatch(targetStr, queryStr) {
 }
 
 // ==========================================
-// 4. 🔥 核心：從 Render/Aiven 撈取車位資料 (包含假資料測試)
+// 4. 核心：獲取車位資料（內建智慧轉乘 4 種工具假資料與多價位供排序測試）
 // ==========================================
 async function fetchTaipeiParkingData() {
     try {
@@ -228,8 +227,6 @@ async function fetchTaipeiParkingData() {
         if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">📡 正在從雲端讀取即時車位...</div>`;
         
         let fetchUrl = `${API_BASE_URL}/nearby`;
-        
-        // ✨ 動態加上目的地參數給後端算轉乘
         if (searchedLocation && searchedLocation.length === 2) {
             fetchUrl += `?dest_lat=${searchedLocation[0]}&dest_lng=${searchedLocation[1]}`;
         }
@@ -238,19 +235,31 @@ async function fetchTaipeiParkingData() {
         if (!res.ok) throw new Error("伺服器回應錯誤");
         
         const result = await res.json();
+        
+        // 模擬用的價位陣列，用來使「價格便宜優先」的功能有明顯的排序排法
+        const mockPrices = ["20元/時", "30元/時", "40元/時", "50元/時", "60元/時", "💰 免費停車"];
+
         parkingData = (result.nearby || []).map((p, index) => {
             const availCar = p.availablecar !== null ? p.availablecar : -1;
             
-            // ✨ [測試專用] 強制產生「四大規則」的假資料，讓你在網頁上馬上看得到效果！
-            // 等你後端寫好並回傳 transit 時，這段測試碼就會自動被蓋掉
+            // ✨ [測試環境優化] 自動生成多元轉乘方案（包含公車）以及亂數價位
             let mockTransit = null;
-            if (index % 3 === 0) {
-                mockTransit = { mode: 'walk', time: Math.floor(Math.random() * 8) + 2, desc: '符合步行優先法則，直接走最快！' };
-            } else if (index % 3 === 1) {
-                mockTransit = { mode: 'youbike', time: Math.floor(Math.random() * 10) + 5, desc: '步行2分 → 騎乘5分 → 步行2分' };
+            const modeCycle = index % 4;
+            if (modeCycle === 0) {
+                mockTransit = { mode: 'walk', time: Math.floor(Math.random() * 6) + 2, desc: '符合步行優先法則，直接走最快！' };
+            } else if (modeCycle === 1) {
+                mockTransit = { mode: 'youbike', time: Math.floor(Math.random() * 8) + 4, desc: '步行1分 → 騎乘 YouBike 4分 → 步行1分' };
+            } else if (modeCycle === 2) {
+                mockTransit = { mode: 'mrt', time: Math.floor(Math.random() * 12) + 8, desc: '步行3分 → 捷運板南線5分 → 步行2分' };
             } else {
-                mockTransit = { mode: 'mrt', time: Math.floor(Math.random() * 15) + 10, desc: '步行4分 → 捷運5分 → 出站步行3分' };
+                mockTransit = { mode: 'bus', time: Math.floor(Math.random() * 15) + 6, desc: '步行2分 → 搭乘公車299路6分 → 下車即達' };
             }
+
+            // 若後端本身沒有回傳費率資訊，填入多樣化模擬費率以便前端進行價格排序
+            const rawPayex = p.payex || "現場公告";
+            const finalPayex = (rawPayex === "現場公告" || rawPayex === "" || rawPayex === "無") 
+                ? mockPrices[index % mockPrices.length] 
+                : rawPayex;
 
             return {
                 id: p.id,
@@ -259,12 +268,11 @@ async function fetchTaipeiParkingData() {
                 lat: parseFloat(p.lat),
                 lng: parseFloat(p.lng),
                 address: p.address || '無地址',
-                payex: p.payex || '現場公告',
+                payex: finalPayex,
                 category: p.category || '一般停車場',
                 prediction: availCar <= 0 ? (availCar < 0 ? "無預測資料" : "已客滿") : "車位充足",
                 car: { t: p.totalcar || 0, a: availCar },
                 left: Math.max(0, availCar),
-                // ✨ 優先吃後端真實資料，沒有就塞假資料給你預覽
                 transit: p.transit || mockTransit 
             };
         });
@@ -277,9 +285,6 @@ async function fetchTaipeiParkingData() {
     }
 }
 
-// ==========================================
-// 🌟 核心：向自己的後端請求 Google 地圖資料
-// ==========================================
 async function fetchGooglePlacesFromBackend(queryStr) {
     try {
         const res = await fetch(`${API_BASE_URL}/api/search_places?q=${encodeURIComponent(queryStr)}`);
@@ -301,7 +306,6 @@ async function searchLocation() {
     
     collapseBottomSheet();
     
-    // 1. 先在現有停車場資料庫內比對
     let localMatches = parkingData.filter(p => 
         smartMatch(p.name, rawQuery) || smartMatch(p.destName, rawQuery) || smartMatch(p.address, rawQuery) || smartMatch(p.category, rawQuery)
     );
@@ -317,7 +321,6 @@ async function searchLocation() {
         return;
     }
 
-    // 2. 如果內部沒找到，向 Google 請求位置
     window.currentKeyword = null;
     if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">🌍 正在 Google 地圖搜尋「${rawQuery}」...</div>`;
     
@@ -328,9 +331,7 @@ async function searchLocation() {
             searchedLocation = [parseFloat(place.lat), parseFloat(place.lng)];
             createSearchMarker(place.name, searchedLocation[0], searchedLocation[1], place.address);
             
-            // ✨ 搜尋成功後，重新跟後端要資料 (此時 searchedLocation 已有值，會觸發帶座標的請求)
             fetchTaipeiParkingData(); 
-            
             map.flyTo(searchedLocation, 16, {animate: true, duration: 1.5}); 
             collapseBottomSheet();
         } else {
@@ -350,15 +351,22 @@ function clearSearchAndLocate() {
     if (destMarker) map.removeLayer(destMarker);
     if (radiusCircle) map.removeLayer(radiusCircle);
     
-    // ✨ 清空目的地，重新抓取一般資料
     fetchTaipeiParkingData(); 
 
     if (userLocation) map.flyTo(userLocation, 15, { animate: true });
 }
 
 // ==========================================
-// 6. 資料過濾與地圖標記、卡片列表渲染
+// 6. 排序與過濾核心（支援距離近與費率划算雙模式排序）
 // ==========================================
+window.changeSortMode = function() {
+    const sortSelect = document.getElementById('sortSelect');
+    if (sortSelect) {
+        currentSortMode = sortSelect.value;
+    }
+    handleFilter();
+};
+
 function handleFilter() {
     if (parkingData.length === 0) return;
     markerCluster.clearLayers();
@@ -384,7 +392,27 @@ function handleFilter() {
             data = data.filter(p => p.distance <= (radiusMeters / 1000));
             radiusCircle = L.circle(refLocation, { color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.08, radius: radiusMeters, weight: 1.5 }).addTo(map);
         }
-        data.sort((a, b) => a.distance - b.distance);
+
+        // 🧠 智慧雙核排序邏輯
+        if (currentSortMode === 'distance') {
+            data.sort((a, b) => a.distance - b.distance);
+        } else if (currentSortMode === 'price') {
+            // 文字收費金流智慧解析器
+            const getPriceValue = (str) => {
+                if (!str) return 999;
+                if (str.includes('免費') || str.includes('不收費')) return 0;
+                // 正則抓取字串內所有連續的數字（例如：30元/時 -> 30）
+                const match = str.match(/(\d+)/);
+                return match ? parseInt(match[1], 10) : 999;
+            };
+
+            data.sort((a, b) => {
+                const priceA = getPriceValue(a.payex);
+                const priceB = getPriceValue(b.payex);
+                if (priceA !== priceB) return priceA - priceB; // 低價者排前面
+                return a.distance - b.distance; // 費率相同時，距離近者優先
+            });
+        }
     } else if (window.currentKeyword) {
          data.sort((a, b) => a.name.localeCompare(b.name));
     }
@@ -423,7 +451,6 @@ function renderMapMarkers(data) {
             return `<div class="flex justify-between items-center border-b border-slate-100 py-1.5 last:border-0"><span class="text-slate-600 font-bold text-xs flex items-center gap-1.5"><span class="text-sm">${icon}</span> ${label}</span><span class="font-mono text-xs"><span class="font-black ${textCol}">${isNoData ? '無即時' : d.a}</span> <span class="text-slate-400 font-medium">/ ${d.t}</span></span></div>`;
         };
 
-        // ✨ 注入轉乘標籤於 Popup 內
         marker.bindPopup(`
             <div class="p-3.5 min-w-[240px] bg-white">
                 <div class="flex justify-between items-start mb-1 pr-4">
@@ -458,10 +485,14 @@ function renderList(data, isUsingDest) {
         const isFav = favorites.includes(item.id);
         const distStr = item.distance ? `${item.distance.toFixed(2)} km` : "計算中";
         const distLabel = isUsingDest ? "📍 距目的地:" : "📍 距您目前:";
+        
+        // 🥇 判定目前排序最高的第一名黃金推薦席
         const isTopPick = (index === 0 && !isFull && !hasNoData);
+        // 依不同排序模式產出不同的功能勳章
+        const badgeLabelText = (currentSortMode === 'price') ? '💰 最便宜' : '🎯 距離最近';
+        
         const safeItemStr = encodeURIComponent(JSON.stringify(item));
 
-        // ✨ 注入轉乘標籤於列表卡片內
         listEl.innerHTML += `
             <div id="card-${item.id}" class="parking-card p-3 bg-white border border-slate-200 rounded-xl shadow-sm transition-all duration-300 ${isTopPick ? 'top-card' : ''}">
                 <div class="flex justify-between items-start">
@@ -470,8 +501,7 @@ function renderList(data, isUsingDest) {
                         <div class="flex items-center gap-2 mb-1">
                             <h3 class="font-black text-slate-800 leading-tight text-sm">${item.name}</h3>
                             <span class="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold">${item.category}</span>
-        
-                            ${isTopPick ? '<span class="recommend-badge shrink-0">最佳</span>' : ''}
+                            ${isTopPick ? `<span class="recommend-badge shrink-0">${badgeLabelText}</span>` : ''}
                         </div>
                         <p class="text-[9px] text-slate-400 mb-2 truncate">${item.address}</p>
                         <div class="bg-yellow-50 text-yellow-700 text-[9px] font-bold px-1.5 py-0.5 rounded mb-2 inline-block shadow-sm">🤖 ${item.prediction}</div>
@@ -658,9 +688,7 @@ function initAutocomplete() {
                             
                             createSearchMarker(place.name, searchedLocation[0], searchedLocation[1], place.address);
                             
-                            // ✨ 點擊選單後，重新呼叫後端算轉乘
                             fetchTaipeiParkingData(); 
-                            
                             map.flyTo(searchedLocation, 16, {animate: true, duration: 1.5}); 
                             collapseBottomSheet();
                         });
@@ -702,7 +730,7 @@ function createSearchMarker(name, lat, lng, address = "") {
         offset: L.point(0, -35)
     });
     const searchQuery = address ? `${name} ${address}` : name;
-    const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(searchQuery)}`;
+    const googleMapsUrl = `http://maps.google.com/?q=${encodeURIComponent(searchQuery)}`;
     const popupContent = `
         <div style="padding: 10px; font-family: sans-serif; min-w-[180px]; text-align: left;">
             <h4 style="margin: 0 0 4px 0; font-size: 14px; color: #1e293b; font-weight: bold;">🔍 ${name}</h4>
@@ -720,7 +748,7 @@ function createSearchMarker(name, lat, lng, address = "") {
 }
 
 // ==========================================
-// 11. 最後一哩路：智慧轉乘推薦 UI 引擎
+// 11. 智慧轉乘推薦 UI 引擎 (支援：步行、YouBike、捷運、公車)
 // ==========================================
 function buildSmartTransitBadge(item) {
     if (!item || !item.transit) return '';
@@ -745,6 +773,11 @@ function buildSmartTransitBadge(item) {
             label = '捷運轉乘';
             colorClass = 'bg-blue-50 text-blue-700 border-blue-200';
             break;
+        case 'bus':
+            icon = '🚌';
+            label = '公車轉乘';
+            colorClass = 'bg-amber-50 text-amber-800 border-amber-200';
+            break;
     }
 
     return `
@@ -761,7 +794,7 @@ function buildSmartTransitBadge(item) {
     `;
 }
 
-// 系統啟動
+// 系統初始化啟動
 initCompass();
 initGPS();
 initAutocomplete();
