@@ -4,10 +4,6 @@ html, body { height: 100vh; width: 100vw; margin: 0; padding: 0; }
 .leaflet-routing-container { display: none !important; }
 
 /* 導航提示框動畫 */
-#nav-header {
-    transform: translateY(-100%);
-    transition: transform 0.4s cubic-bezier(0.25, 1, 0.5, 1);
-}
 #nav-header.active { transform: translateY(0); }
 
 /* 彈窗 (Popup) 美化 */
@@ -18,69 +14,85 @@ html, body { height: 100vh; width: 100vw; margin: 0; padding: 0; }
 /* 地圖圖示特效 */
 .car-marker-container { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; transition: transform 0.5s linear; }
 .car-marker { font-size: 32px; filter: drop-shadow(0px 4px 6px rgba(0,0,0,0.4)); line-height: 1; }
-.car-marker-container::after { content: ''; position: absolute; width: 34px; height: 34px; background: rgba(59,130,246,0.2); border-radius: 50%; animation: pulseGPS 2s infinite ease-out; z-index: -1; }
+.car-marker-container::after { content: ''; position: absolute; width: 34px; height: 34px; background: rgba(59, 130, 246, 0.4); border-radius: 50%; z-index: -1; animation: pulse 2s infinite; }
+@keyframes pulse { 0% { transform: scale(0.8); opacity: 1; } 100% { transform: scale(2); opacity: 0; } }
 
-@keyframes pulseGPS {
-    0% { transform: scale(0.5); opacity: 1; }
-    100% { transform: scale(1.8); opacity: 0; }
-}
+.dest-marker-container { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; animation: bounce 0.8s infinite alternate cubic-bezier(0.5, 0.05, 1, 0.5); }
+.dest-marker { font-size: 40px; filter: drop-shadow(0px 5px 5px rgba(0,0,0,0.5)); line-height: 1; }
+@keyframes bounce { 0% { transform: translateY(0); } 100% { transform: translateY(-15px); } }
 
-/* 推薦黃金卡片特效 */
-.top-card {
-    border: 2px solid #3b82f6 !important;
-    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%) !important;
-    box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.15), 0 8px 10px -6px rgba(59, 130, 246, 0.15) !important;
-    animation: cardEntrance 0.5s cubic-bezier(0.25, 1, 0.5, 1) forwards;
-}
-
-@keyframes cardEntrance {
-    0% { transform: scale(0.96) translateY(10px); opacity: 0; }
-    100% { transform: scale(1) translateY(0); opacity: 1; }
-}
-
-/* 智慧排序精美標籤 */
-.recommend-badge {
-    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-    color: white;
-    font-size: 10px;
-    font-weight: 900;
-    padding: 3px 8px;
+/* 列表特效 */
+.recommend-badge { 
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); 
+    color: white; 
+    padding: 3px 8px; 
     border-radius: 6px;
-    box-shadow: 0 2px 6px rgba(37,99,235,0.4);
-    letter-spacing: 0.5px;
+    font-size: 10px; 
+    font-weight: 900; 
+    letter-spacing: 0.5px; 
+    box-shadow: 0 2px 4px rgba(37, 99, 235, 0.3);
+}
+.top-card { 
+    border: 2px solid #3b82f6 !important; 
+    background-color: #f4f8ff !important; 
+    box-shadow: 0 4px 10px rgba(59,130,246,0.15) !important;
 }
 
-/* 地圖客製化標籤常駐樣式 */
+/* 抽屜預設樣式 (桌面版滾動修復) */
+@media (min-width: 768px) {
+    #bottom-sheet { 
+        height: auto !important;
+        min-height: 0 !important; 
+        flex: 1 !important; 
+        transform: none !important; 
+    }
+    body { touch-action: auto; }
+}
+
+/* 🌟 新增：收藏系統專用小星星樣式 */
+.fav-star {
+    font-size: 18px;
+    cursor: pointer;
+    transition: transform 0.2s, color 0.2s;
+}
+.fav-star:active {
+    transform: scale(1.3);
+}
+.fav-star.active {
+    color: #eab308;
+}
+.fav-star.inactive {
+    color: #cbd5e1;
+}
+
+/* 🌟 自訂地圖常駐店名標籤樣式 */
 .custom-map-label {
-    background-color: #10b981 !important;
-    border: 1.5px solid #ffffff !important;
-    color: #ffffff !important;
-    font-weight: 900 !important;
-    font-size: 12px !important;
+    background-color: #ffffff !important;
+    color: #10b981 !important;
+    border: 2px solid #10b981 !important;
+    border-radius: 20px !important;
     padding: 4px 10px !important;
-    border-radius: 8px !important;
-    box-shadow: 0 4px 12px rgba(16,185,129,0.4) !important;
-    white-space: nowrap;
+    font-size: 13px !important;
+    font-weight: bold !important;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15) !important;
+    white-space: nowrap !important;
 }
 
-/* 常駐終點旗幟樣式與降落動畫 */
-.dest-marker-container { display: flex; justify-content: center; align-items: flex-end; width: 40px; height: 40px; }
-.dest-marker { font-size: 34px; filter: drop-shadow(0px 4px 6px rgba(0,0,0,0.3)); line-height: 1; animation: destBounce 1.5s infinite ease-in-out; }
-@keyframes destBounce {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-8px); }
+.custom-map-label::before {
+    border-right-color: #10b981 !important;
 }
 
+/* 搜尋結果粉紅大頭針的掉落特效 */
 .target-marker-container { 
     display: flex; 
     justify-content: center; 
     align-items: flex-end; 
     width: 40px; 
-    height: 40px; 
+    height: 40px;
     animation: dropDown 0.5s cubic-bezier(0.25, 1, 0.5, 1) forwards; 
 }
 .target-marker { 
-    font-size: 36px; 
+    font-size: 36px;
     filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.4)); 
     line-height: 1; 
 }
@@ -90,7 +102,7 @@ html, body { height: 100vh; width: 100vw; margin: 0; padding: 0; }
 }
 .custom-div-icon { 
     background: none !important; 
-    border: none !important; 
+    border: none !important;
 }
 
 /* 🔧 修正搜尋標籤的小箭頭位置與顏色 */
@@ -101,15 +113,8 @@ html, body { height: 100vh; width: 100vw; margin: 0; padding: 0; }
     transform: translateX(-50%) !important;
 }
 
-/* 響應式行動端版面 */
-@media (max-width: 767px) {
-    #search-panel {
-        position: fixed;
-        bottom: 0; left: 0; right: 0;
-        width: 100%; height: auto;
-        border-radius: 24px 24px 0 0;
-        box-shadow: 0 -10px 30px rgba(0,0,0,0.15);
-    }
-    #map { height: 100vh; width: 100vw; }
-    #bottom-sheet { height: 35vh; }
+/* 確保 Leaflet 預設的邊框干擾被清除 */
+.leaflet-tooltip.custom-map-label {
+    background-color: #ffffff !important;
+    border: 2px solid #10b981 !important;
 }

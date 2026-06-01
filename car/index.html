@@ -14,87 +14,87 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
     <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
-    
     <link rel="stylesheet" href="style.css">
 </head>
-<body class="bg-slate-100 font-sans select-none overflow-hidden text-slate-800 antialiased">
+<body class="bg-slate-100 overflow-hidden relative touch-none md:touch-auto">
 
-    <div id="nav-header" class="fixed top-0 left-0 right-0 h-16 bg-blue-600 text-white z-[9999] flex items-center justify-between px-4 shadow-xl border-b border-blue-500/30">
+    <div id="nav-header" class="fixed top-0 left-0 right-0 z-[4000] bg-blue-700 text-white p-3 shadow-2xl flex flex-col gap-2 transition-transform duration-300 transform -translate-y-full">
         <div class="flex items-center gap-3">
-            <div id="nav-arrow" class="text-3xl font-black drop-shadow animate-bounce">⬆️</div>
-            <div class="flex flex-col">
-                <span id="nav-instruction" class="font-black text-sm tracking-wide truncate max-w-[220px] md:max-w-md">正在引導至停車場...</span>
-                <span id="nav-metrics" class="text-[11px] font-bold text-blue-200 mt-0.5">計算中...</span>
+            <div class="w-12 h-12 flex items-center justify-center bg-white/20 rounded-xl border border-white/30 shrink-0">
+                <span id="nav-arrow" class="text-3xl font-bold">⬆️</span>
             </div>
+            <div class="flex-1 overflow-hidden">
+                <p id="nav-instruction" class="text-base font-bold leading-tight truncate">計算路徑中...</p>
+                <p id="nav-metrics" class="text-xs opacity-90 font-mono tracking-wide mt-1">計算中...</p>
+            </div>
+            <button onclick="stopNavigation()" class="bg-red-500 hover:bg-red-600 px-3 py-2 rounded-lg font-bold shadow-md transition active:scale-95 text-xs shrink-0">結束<br>導航</button>
         </div>
-        <button onclick="stopNavigation()" class="bg-red-500 hover:bg-red-600 active:scale-95 text-white font-black px-3 py-1.5 rounded-lg text-xs tracking-wider shadow-md transition">
-            結束導航
-        </button>
     </div>
 
-    <div class="w-screen h-screen flex flex-col md:flex-row relative">
+    <div id="ui-container" class="absolute top-0 left-0 w-full h-full pointer-events-none flex flex-col md:flex-row z-[2000] overflow-hidden">
         
-        <div id="search-panel" class="w-full md:w-[380px] bg-white shadow-2xl flex flex-col z-[1000] transition-transform duration-300 ease-in-out md:h-screen shrink-0">
+        <div id="sidebar-wrapper" class="w-full md:w-[400px] h-full flex flex-col shrink-0 md:bg-white md:shadow-[4px_0_24px_rgba(0,0,0,0.1)] relative overflow-hidden">
             
-            <div class="p-4 pb-2 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
-                <div class="flex items-center gap-2">
-                    <span class="text-2xl">⚡</span>
-                    <h1 class="text-xl font-black bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent tracking-tight">P-Finder 智能停車</h1>
-                </div>
-                <div class="flex items-center gap-1.5 text-xs font-bold text-slate-400 bg-slate-50 px-2.5 py-1 rounded-full border border-slate-100">
-                    <span id="gps-dot" class="w-2 h-2 bg-slate-300 rounded-full"></span>
-                    <span>GPS 衛星連線</span>
-                </div>
-            </div>
-
-            <div class="p-4 bg-white border-b border-slate-100 space-y-3 shrink-0">
-                <div class="relative">
-                    <input type="text" id="searchInput" placeholder="輸入目的地（例如：台北101、醫院...）" 
-                           class="w-full pl-10 pr-24 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold placeholder-slate-400 outline-none transition focus:bg-white focus:border-blue-500 focus:shadow-[0_0_0_4px_rgba(59,130,246,0.1)]">
-                    <span class="absolute left-3.5 top-3.5 text-slate-400 font-bold text-base">🔍</span>
-                    
-                    <div class="absolute right-2 top-1.5 flex gap-1">
-                        <button onclick="clearSearchAndLocate()" class="p-1.5 text-slate-400 hover:text-slate-600 text-sm font-bold transition">✕</button>
-                        <button onclick="searchLocation()" class="bg-blue-600 hover:bg-blue-700 text-white font-black text-xs px-3.5 py-2 rounded-lg shadow-md transition active:scale-95">搜尋</button>
+            <div id="search-panel" class="pointer-events-auto bg-white p-3 shadow-sm md:shadow-none rounded-b-2xl md:rounded-none z-50 transition-transform duration-300 ease-in-out shrink-0">
+                <div class="flex justify-between items-center mb-3">
+                    <h1 class="text-xl font-black text-blue-700 italic tracking-tighter">P-Finder</h1>
+                    <div id="gps-status" class="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded-md border">
+                        GPS <div id="gps-dot" class="w-2 h-2 bg-red-500 rounded-full"></div>
                     </div>
                 </div>
+                
+                <div class="flex flex-col gap-2">
+                    <div class="flex gap-1.5 relative">
+                        <div class="relative flex-1">
+                            <input type="text" id="searchInput" autocomplete="off" onkeydown="if(event.key === 'Enter') searchLocation()" placeholder="搜尋停車場、超商或地點..." 
+                                   class="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-400 focus:bg-blue-50 transition">
+                            <div id="autocomplete-list" class="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl hidden max-h-[40vh] overflow-y-auto z-[5000]">
+                            </div>
+                        </div>
+                        <button onclick="searchLocation()" class="bg-blue-600 text-white px-4 rounded-lg shadow-sm active:bg-blue-800 text-sm font-bold transition shrink-0">搜尋</button>
+                        <button onclick="clearSearchAndLocate()" class="bg-white border border-slate-200 w-10 rounded-lg shadow-sm active:bg-slate-50 text-lg flex items-center justify-center shrink-0">📍</button>
+                    </div>
 
-                <div class="flex gap-2">
-                    <select id="radiusSelect" onchange="handleFilter()" class="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none font-bold text-slate-600 focus:border-blue-400 cursor-pointer shadow-sm">
-                        <option value="500">📍 500 公尺內</option>
-                        <option value="1000" selected>📍 1 公里內</option>
-                        <option value="2000">📍 2 公里內</option>
-                        <option value="5000">📍 5 公里內</option>
-                        <option value="99999">📍 顯示全部</option>
-                    </select>
-                    
-                    <select id="sortSelect" onchange="changeSortMode()" class="flex-1 p-2 bg-blue-50 border border-blue-200 rounded-lg text-sm outline-none font-black text-blue-700 focus:border-blue-400 cursor-pointer shadow-sm">
-                        <option value="distance" selected>✨ 推薦：距離最近</option>
-                        <option value="price">💰 推薦：價格最便宜</option>
-                    </select>
+                    <div class="flex gap-2">
+                        <select id="radiusSelect" onchange="handleFilter()" class="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none font-bold text-slate-600 focus:border-blue-400 cursor-pointer shadow-sm">
+                            <option value="500">📍 500 公尺內</option>
+                            <option value="1000" selected>📍 1 公里內</option>
+                            <option value="2000">📍 2 公里內</option>
+                            <option value="5000">📍 5 公里內</option>
+                            <option value="99999">📍 顯示全部</option>
+                        </select>
+                        
+                        <select id="sortSelect" onchange="changeSortMode()" class="flex-1 p-2 bg-blue-50 border border-blue-200 rounded-lg text-sm outline-none font-black text-blue-700 focus:border-blue-400 cursor-pointer shadow-sm">
+                            <option value="distance" selected>✨ 推薦：距離最近</option>
+                            <option value="price">💰 推薦：價格最便宜</option>
+                        </select>
+                    </div>
                 </div>
             </div>
 
-            <div id="bottom-sheet" class="flex-1 flex flex-col bg-white rounded-t-3xl md:rounded-none transition-transform duration-300 ease-in-out relative md:flex-1 overflow-hidden md:h-0 md:min-h-0">
+            <div class="flex-1 pointer-events-none md:hidden"></div>
+
+            <div id="bottom-sheet" class="pointer-events-auto bg-white rounded-t-3xl md:rounded-none shadow-[0_-10px_30px_rgba(0,0,0,0.1)] md:shadow-none flex flex-col z-30 transition-transform duration-300 ease-in-out relative md:flex-1 overflow-hidden md:h-0 md:min-h-0">
                 <div id="drag-handle" class="w-full h-8 flex justify-center items-center md:hidden cursor-pointer shrink-0" onclick="toggleBottomSheet()">
                     <svg id="sheet-arrow" class="w-7 h-7 text-slate-400 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width=\"3\" d=\"M5 15l7-7 7 7\"></path>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 15l7-7 7 7"></path>
                     </svg>
                 </div>
 
                 <div class="flex border-b border-t md:border-t-0 text-center text-sm font-bold text-slate-400 shrink-0">
-                    <button onclick="switchTab('search')" id=\"tab-search\" class=\"flex-1 py-2.5 text-blue-600 border-b-2 border-blue-600\">附近推薦</button>
-                    <button onclick="switchTab('fav')" id=\"tab-fav\" class=\"flex-1 py-2.5 border-b-2 border-transparent\">我的收藏</button>
+                    <button onclick="switchTab('search')" id="tab-search" class="flex-1 py-2.5 text-blue-600 border-b-2 border-blue-600">附近推薦</button>
+                    <button onclick="switchTab('fav')" id="tab-fav" class="flex-1 py-2.5 border-b-2 border-transparent">我的收藏</button>
                 </div>
 
                 <div id="content-list" class="flex-1 overflow-y-auto p-3 space-y-2.5 bg-slate-50/50 md:bg-white no-scrollbar pb-10 overscroll-contain">
-                    </div>
+                    <div class="text-center py-20 text-slate-400 font-bold">📡 正在連接 Aiven 雲端資料庫...</div>
+                </div>
             </div>
         </div>
-
-        <div id="map" class="flex-1 h-full z-[10]"></div>
     </div>
-
+    
+    <div id="map" class="absolute top-0 left-0 w-full h-full z-[1000]"></div>
+    
     <script src="script.js"></script>
 </body>
 </html>
