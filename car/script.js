@@ -219,7 +219,7 @@ function smartMatch(targetStr, queryStr) {
 }
 
 // ==========================================
-// 4. 核心：獲取車位資料（內建智慧轉乘 4 種工具假資料與多價位供排序測試）
+// 4. 核心：獲取車位資料與【智慧距離轉乘模擬器】
 // ==========================================
 async function fetchTaipeiParkingData() {
     try {
@@ -236,26 +236,44 @@ async function fetchTaipeiParkingData() {
         
         const result = await res.json();
         
-        // 模擬用的價位陣列，用來使「價格便宜優先」的功能有明顯的排序排法
         const mockPrices = ["20元/時", "30元/時", "40元/時", "50元/時", "60元/時", "💰 免費停車"];
 
         parkingData = (result.nearby || []).map((p, index) => {
             const availCar = p.availablecar !== null ? p.availablecar : -1;
             
-            // ✨ [測試環境優化] 自動生成多元轉乘方案（包含公車）以及亂數價位
+            // 💡 修正邏輯：根據「真實距離」來分派交通工具，不亂數瞎猜！
             let mockTransit = null;
-            const modeCycle = index % 4;
-            if (modeCycle === 0) {
-                mockTransit = { mode: 'walk', time: Math.floor(Math.random() * 6) + 2, desc: '符合步行優先法則，直接走最快！' };
-            } else if (modeCycle === 1) {
-                mockTransit = { mode: 'youbike', time: Math.floor(Math.random() * 8) + 4, desc: '步行1分 → 騎乘 YouBike 4分 → 步行1分' };
-            } else if (modeCycle === 2) {
-                mockTransit = { mode: 'mrt', time: Math.floor(Math.random() * 12) + 8, desc: '步行3分 → 捷運板南線5分 → 步行2分' };
+            let distToDest = 999;
+            
+            // 找出停車場與目的地的真實距離
+            if (searchedLocation) {
+                distToDest = calculateDistance(searchedLocation[0], searchedLocation[1], p.lat, p.lng);
+            } else if (userLocation) {
+                distToDest = calculateDistance(userLocation[0], userLocation[1], p.lat, p.lng);
             } else {
-                mockTransit = { mode: 'bus', time: Math.floor(Math.random() * 15) + 6, desc: '步行2分 → 搭乘公車299路6分 → 下車即達' };
+                // 如果都沒有，預設以台北101為中心算假距離，確保系統不會報錯
+                distToDest = calculateDistance(25.0339, 121.5644, p.lat, p.lng);
             }
 
-            // 若後端本身沒有回傳費率資訊，填入多樣化模擬費率以便前端進行價格排序
+            // 🧠 四大規則智慧判斷 (前端模擬版)
+            if (distToDest <= 0.8) {
+                // 距離小於 800m：強制走路 (時速約 4.8km/h -> 每分鐘走 80m)
+                const walkTime = Math.max(1, Math.ceil((distToDest * 1000) / 80));
+                mockTransit = { mode: 'walk', time: walkTime, desc: '符合步行優先法則，直接走最快！' };
+            } else if (distToDest <= 2.5) {
+                // 距離 800m ~ 2.5km：YouBike 甜蜜點 (時速約 12km/h -> 每分鐘騎 200m，外加 4 分鐘找車緩衝)
+                const bikeTime = Math.max(5, Math.ceil((distToDest * 1000) / 200) + 4);
+                mockTransit = { mode: 'youbike', time: bikeTime, desc: '步行2分 → 騎乘YouBike → 步行2分' };
+            } else {
+                // 距離 2.5km 以上：長途轉乘捷運或公車
+                const transitTime = Math.max(10, Math.ceil((distToDest * 1000) / 400) + 8);
+                if (index % 2 === 0) {
+                    mockTransit = { mode: 'mrt', time: transitTime, desc: '步行至捷運站 → 乘車 → 出站步行' };
+                } else {
+                    mockTransit = { mode: 'bus', time: transitTime, desc: '步行至公車站 → 搭乘公車 → 下車即達' };
+                }
+            }
+
             const rawPayex = p.payex || "現場公告";
             const finalPayex = (rawPayex === "現場公告" || rawPayex === "" || rawPayex === "無") 
                 ? mockPrices[index % mockPrices.length] 
@@ -273,7 +291,7 @@ async function fetchTaipeiParkingData() {
                 prediction: availCar <= 0 ? (availCar < 0 ? "無預測資料" : "已客滿") : "車位充足",
                 car: { t: p.totalcar || 0, a: availCar },
                 left: Math.max(0, availCar),
-                transit: p.transit || mockTransit 
+                transit: p.transit || mockTransit // 優先吃後端，後端沒給就吃算好的聰明假資料
             };
         });
         console.log(`成功載入 ${parkingData.length} 筆資料。`);
@@ -393,15 +411,12 @@ function handleFilter() {
             radiusCircle = L.circle(refLocation, { color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.08, radius: radiusMeters, weight: 1.5 }).addTo(map);
         }
 
-        // 🧠 智慧雙核排序邏輯
         if (currentSortMode === 'distance') {
             data.sort((a, b) => a.distance - b.distance);
         } else if (currentSortMode === 'price') {
-            // 文字收費金流智慧解析器
             const getPriceValue = (str) => {
                 if (!str) return 999;
                 if (str.includes('免費') || str.includes('不收費')) return 0;
-                // 正則抓取字串內所有連續的數字（例如：30元/時 -> 30）
                 const match = str.match(/(\d+)/);
                 return match ? parseInt(match[1], 10) : 999;
             };
@@ -409,8 +424,8 @@ function handleFilter() {
             data.sort((a, b) => {
                 const priceA = getPriceValue(a.payex);
                 const priceB = getPriceValue(b.payex);
-                if (priceA !== priceB) return priceA - priceB; // 低價者排前面
-                return a.distance - b.distance; // 費率相同時，距離近者優先
+                if (priceA !== priceB) return priceA - priceB;
+                return a.distance - b.distance; 
             });
         }
     } else if (window.currentKeyword) {
@@ -451,7 +466,6 @@ function renderMapMarkers(data) {
             return `<div class="flex justify-between items-center border-b border-slate-100 py-1.5 last:border-0"><span class="text-slate-600 font-bold text-xs flex items-center gap-1.5"><span class="text-sm">${icon}</span> ${label}</span><span class="font-mono text-xs"><span class="font-black ${textCol}">${isNoData ? '無即時' : d.a}</span> <span class="text-slate-400 font-medium">/ ${d.t}</span></span></div>`;
         };
 
-        // 💡 準備傳遞給導航的資料
         const safeItemStr = encodeURIComponent(JSON.stringify(item));
 
         marker.bindPopup(`
@@ -494,18 +508,15 @@ function renderList(data, isUsingDest) {
         const distStr = item.distance ? `${item.distance.toFixed(2)} km` : "計算中";
         const distLabel = isUsingDest ? "📍 距目的地:" : "📍 距您目前:";
         
-        // 🥇 判定目前排序最高的第一名黃金推薦席
         const isTopPick = (index === 0 && !isFull && !hasNoData);
-        // 依不同排序模式產出不同的功能勳章
         const badgeLabelText = (currentSortMode === 'price') ? '💰 最便宜' : '🎯 距離最近';
         
         const safeItemStr = encodeURIComponent(JSON.stringify(item));
 
         listEl.innerHTML += `
             <div id="card-${item.id}" class="parking-card p-3 bg-white border border-slate-200 rounded-xl shadow-sm transition-all duration-300 ${isTopPick ? 'top-card' : ''}">
-                <div class="flex justify-between items-start">
+                <div class="flex justify-between items-stretch">
                     <div class="cursor-pointer flex-1 pr-2" onclick="selectCard('${item.id}', ${item.lat}, ${item.lng})">
-   
                         <div class="flex items-center gap-2 mb-1">
                             <h3 class="font-black text-slate-800 leading-tight text-sm">${item.name}</h3>
                             <span class="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold">${item.category}</span>
@@ -522,9 +533,13 @@ function renderList(data, isUsingDest) {
                         ${buildSmartTransitBadge(item)}
                     </div>
                     
-                    <div class="flex flex-col items-end gap-2.5 shrink-0">
-                        <button onclick="toggleFav('${item.id}')" class="text-xl active:scale-75 transition">${isFav ? '🩷' : '🤍'}</button>
-                        <button onclick="startNav('${safeItemStr}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-black shadow-md active:scale-95 transition">導航</button>
+                    <div class="flex flex-col items-center justify-between shrink-0 border-l border-slate-100 pl-3 ml-1">
+                        <button onclick="toggleFav('${item.id}')" class="text-xl active:scale-75 transition pt-1" title="加入/移除收藏">${isFav ? '🩷' : '🤍'}</button>
+                        
+                        <button onclick="startNav('${safeItemStr}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-[11px] font-black shadow-md active:scale-95 transition flex flex-col items-center gap-1 mt-3">
+                            <span class="text-sm leading-none">🧭</span>
+                            導航
+                        </button>
                     </div>
                 </div>
             </div>`;
