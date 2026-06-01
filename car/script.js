@@ -22,8 +22,9 @@ let userMarker = null, searchedLocation = null, destMarker = null, radiusCircle 
 let routingControl = null, isNavigating = false, currentDestination = null, currentTab = 'search';
 let favorites = JSON.parse(localStorage.getItem('p_favs')) || [];
 
-// ✨ 智慧排序模式全域變數
+// ✨ 智慧排序模式與地圖標記紀錄 (用於雙向連動)
 let currentSortMode = 'distance';
+window.markersMap = {}; // 紀錄所有標記的字典
 
 // UI 元件
 const bottomSheet = document.getElementById('bottom-sheet');
@@ -425,23 +426,22 @@ function handleFilter() {
     }
 
     renderMapMarkers(data);
-    renderList(data.slice(0, 60), !!searchedLocation); 
+    
+    // ✨ 霸氣解除限制：直接傳入所有 data，確保每個地圖標記都有對應的卡片！
+    renderList(data, !!searchedLocation); 
 }
 
-// 🌟 新增：點擊地圖時，尋找對應卡片並加上藍框、置中滾動的功能
+// 🌟 地圖 ➡️ 列表 的反向連動功能
 window.highlightCardInList = function(id) {
     const targetCard = document.getElementById(`card-${id}`);
     if (targetCard) {
         // 清除所有卡片的藍色框框
         document.querySelectorAll('.parking-card').forEach(card => card.classList.remove('top-card'));
-        
         // 幫目標卡片加上藍色框框
         targetCard.classList.add('top-card');
-        
         // 讓列表自動滾動到該卡片的位置 (置中顯示)
         targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        
-        // 如果在手機版，且列表被收起來了，就自動展開它讓你看到卡片
+        // 如果在手機版，自動展開抽屜
         if (window.innerWidth < 768 && !isSheetExpanded) {
             toggleBottomSheet();
         }
@@ -450,7 +450,9 @@ window.highlightCardInList = function(id) {
 
 function renderMapMarkers(data) {
     markerCluster.clearLayers();
+    window.markersMap = {}; // 清空並準備記錄所有地圖標記
     const markers = [];
+    
     data.forEach(item => {
         const isFull = item.car.a === 0;
         const color = item.car.a < 0 ? '#94a3b8' : (isFull ? '#ef4444' : (item.car.a <= 10 ? '#f59e0b' : '#10b981'));
@@ -503,11 +505,13 @@ function renderMapMarkers(data) {
             </div>
         `);
 
-        // 🌟 新增：當點擊地圖上的地標時，呼叫我們剛寫好的反向連動功能
+        // 點擊地圖時，尋找對應卡片並加上藍框
         marker.on('click', () => {
             highlightCardInList(item.id);
         });
 
+        // 紀錄每一筆地標，方便「列表 ➡️ 地圖」連動時開啟 Popup
+        window.markersMap[item.id] = marker;
         markers.push(marker);
     });
     markerCluster.addLayers(markers);
@@ -564,14 +568,26 @@ function renderList(data, isUsingDest) {
     });
 }
 
+// 🌟 列表 ➡️ 地圖 的反向連動功能：點擊後地圖自動開 Popup
 function selectCard(id, lat, lng) {
     collapseBottomSheet();
-    map.flyTo([lat, lng], 18, {duration: 1.5});
+    // 飛到目標位置
+    map.flyTo([lat, lng], 17, {duration: 1.5});
+    
+    // 加上藍色框框
     document.querySelectorAll('.parking-card').forEach(card => card.classList.remove('top-card'));
     const activeCard = document.getElementById(`card-${id}`);
     if (activeCard) {
         activeCard.classList.add('top-card');
         activeCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    // ✨ 終極連動：自動幫你把地圖上的資訊彈窗打開！
+    if (window.markersMap && window.markersMap[id]) {
+        // 稍微延遲一下等地圖飛過去，確保 MarkerCluster 解開群組後再彈出視窗
+        setTimeout(() => {
+            window.markersMap[id].openPopup();
+        }, 300);
     }
 }
 
