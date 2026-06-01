@@ -220,15 +220,16 @@ function smartMatch(targetStr, queryStr) {
 }
 
 // ==========================================
-// 4. 🔥 核心：從 Render/Aiven 撈取車位資料 (新增轉乘參數支援)
+// 4. 🔥 核心：從 Render/Aiven 撈取車位資料 (包含假資料測試)
 // ==========================================
 async function fetchTaipeiParkingData() {
     try {
         const listEl = document.getElementById('content-list');
         if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">📡 正在從雲端讀取即時車位...</div>`;
         
-        // ✨ 動態加上目的地參數給後端算轉乘
         let fetchUrl = `${API_BASE_URL}/nearby`;
+        
+        // ✨ 動態加上目的地參數給後端算轉乘
         if (searchedLocation && searchedLocation.length === 2) {
             fetchUrl += `?dest_lat=${searchedLocation[0]}&dest_lng=${searchedLocation[1]}`;
         }
@@ -237,8 +238,20 @@ async function fetchTaipeiParkingData() {
         if (!res.ok) throw new Error("伺服器回應錯誤");
         
         const result = await res.json();
-        parkingData = (result.nearby || []).map(p => {
+        parkingData = (result.nearby || []).map((p, index) => {
             const availCar = p.availablecar !== null ? p.availablecar : -1;
+            
+            // ✨ [測試專用] 強制產生「四大規則」的假資料，讓你在網頁上馬上看得到效果！
+            // 等你後端寫好並回傳 transit 時，這段測試碼就會自動被蓋掉
+            let mockTransit = null;
+            if (index % 3 === 0) {
+                mockTransit = { mode: 'walk', time: Math.floor(Math.random() * 8) + 2, desc: '符合步行優先法則，直接走最快！' };
+            } else if (index % 3 === 1) {
+                mockTransit = { mode: 'youbike', time: Math.floor(Math.random() * 10) + 5, desc: '步行2分 → 騎乘5分 → 步行2分' };
+            } else {
+                mockTransit = { mode: 'mrt', time: Math.floor(Math.random() * 15) + 10, desc: '步行4分 → 捷運5分 → 出站步行3分' };
+            }
+
             return {
                 id: p.id,
                 name: p.name,
@@ -251,7 +264,8 @@ async function fetchTaipeiParkingData() {
                 prediction: availCar <= 0 ? (availCar < 0 ? "無預測資料" : "已客滿") : "車位充足",
                 car: { t: p.totalcar || 0, a: availCar },
                 left: Math.max(0, availCar),
-                transit: p.transit // ✨ 接收後端算好的轉乘資料
+                // ✨ 優先吃後端真實資料，沒有就塞假資料給你預覽
+                transit: p.transit || mockTransit 
             };
         });
         console.log(`成功載入 ${parkingData.length} 筆資料。`);
@@ -314,7 +328,7 @@ async function searchLocation() {
             searchedLocation = [parseFloat(place.lat), parseFloat(place.lng)];
             createSearchMarker(place.name, searchedLocation[0], searchedLocation[1], place.address);
             
-            // ✨ 搜尋成功後，重新跟後端要資料，讓後端算好轉乘
+            // ✨ 搜尋成功後，重新跟後端要資料 (此時 searchedLocation 已有值，會觸發帶座標的請求)
             fetchTaipeiParkingData(); 
             
             map.flyTo(searchedLocation, 16, {animate: true, duration: 1.5}); 
@@ -466,6 +480,7 @@ function renderList(data, isUsingDest) {
                             <span class="text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm flex items-center gap-1 ${colorClass}">🚗 汽車 <span class="opacity-90">${hasNoData ? '?' : item.car.a}/${item.car.t}</span></span>
                         </div>
                         <p class="text-[9px] text-blue-500 font-bold font-mono bg-blue-50 inline-block px-1.5 py-0.5 rounded">${distLabel} ${distStr}</p>
+                        
                         ${buildSmartTransitBadge(item)}
                     </div>
                     
