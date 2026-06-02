@@ -254,7 +254,6 @@ async function fetchTaipeiParkingData() {
 
             if (distToDest <= 0.8) {
                 const walkTime = Math.max(1, Math.ceil((distToDest * 1000) / 80));
-                // ✨ 將 desc 改為空字串，隱藏下方的小字說明
                 mockTransit = { mode: 'walk', time: walkTime, desc: '' };
             } else if (distToDest <= 2.5) {
                 const bikeTime = Math.max(5, Math.ceil((distToDest * 1000) / 200) + 4);
@@ -457,9 +456,11 @@ function renderMapMarkers(data) {
     
     data.forEach(item => {
         const isFull = item.car.a === 0;
-        const color = item.car.a < 0 ? '#94a3b8' : (isFull ? '#ef4444' : (item.car.a <= 10 ? '#f59e0b' : '#10b981'));
         
-        // 🛑 修改點 1：將原本的 '?' 替換為 'P'
+        // 🛑 修改點 1：將原本的灰底 '#94a3b8' 替換為真實停車標誌深藍 '#1d4ed8'
+        const color = item.car.a < 0 ? '#1d4ed8' : (isFull ? '#ef4444' : (item.car.a <= 10 ? '#f59e0b' : '#10b981'));
+        
+        // 將原本的 '?' 替換為 'P'
         const displayNum = item.car.a < 0 ? 'P' : item.car.a;
 
         const textStr = String(displayNum);
@@ -477,7 +478,7 @@ function renderMapMarkers(data) {
             })
         });
 
-        // 🛑 修改點 2：Popup 處理無資料狀態
+        // Popup 處理無資料狀態
         const buildRow = (icon, label, d) => {
             if(d.t <= 0) return '';
             const isNoData = d.a < 0;
@@ -542,7 +543,10 @@ function renderList(data, isUsingDest) {
     
     data.forEach((item, index) => {
         const isFull = item.car.a === 0, hasNoData = item.car.a < 0;
-        const colorClass = hasNoData ? 'bg-slate-400 text-white' : (isFull ? 'bg-red-500 text-white' : 'bg-emerald-500 text-white');
+        
+        // 🛑 修改點 2：將原本的 bg-slate-400 替換為深藍色 bg-blue-700
+        const colorClass = hasNoData ? 'bg-blue-700 text-white' : (isFull ? 'bg-red-500 text-white' : 'bg-emerald-500 text-white');
+        
         const isFav = favorites.includes(item.id);
         const distStr = item.distance ? `${item.distance.toFixed(2)} km` : "計算中";
         const distLabel = isUsingDest ? "📍 距目的地:" : "📍 距您目前:";
@@ -552,7 +556,7 @@ function renderList(data, isUsingDest) {
         
         const safeItemStr = encodeURIComponent(JSON.stringify(item));
 
-        // 🛑 修改點 3：處理列表的無資料顯示
+        // 處理列表的無資料顯示
         const carStatusHtml = hasNoData 
             ? `共 ${item.car.t} 位 <span class="text-[9px] font-normal ml-0.5">(無即時資料)</span>`
             : `${item.car.a}/${item.car.t}`;
