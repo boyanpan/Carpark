@@ -427,8 +427,6 @@ function handleFilter() {
     }
 
     renderMapMarkers(data);
-    
-    // ✨ 霸氣解除限制：直接傳入所有 data，確保每個地圖標記都有對應的卡片！
     renderList(data, !!searchedLocation); 
 }
 
@@ -449,15 +447,20 @@ window.highlightCardInList = function(id) {
     }
 };
 
+// ==========================================
+// 🛠️ 更新 1：更新地圖標記與 Popup 視窗 (renderMapMarkers)
+// ==========================================
 function renderMapMarkers(data) {
     markerCluster.clearLayers();
-    window.markersMap = {}; // 清空並準備記錄所有地圖標記
+    window.markersMap = {}; 
     const markers = [];
     
     data.forEach(item => {
         const isFull = item.car.a === 0;
         const color = item.car.a < 0 ? '#94a3b8' : (isFull ? '#ef4444' : (item.car.a <= 10 ? '#f59e0b' : '#10b981'));
-        const displayNum = item.car.a < 0 ? '?' : item.car.a;
+        
+        // 🛑 修改點 1：將原本的 '?' 替換為 'P'
+        const displayNum = item.car.a < 0 ? 'P' : item.car.a;
 
         const textStr = String(displayNum);
         let iconWidth = 24;        
@@ -474,11 +477,23 @@ function renderMapMarkers(data) {
             })
         });
 
+        // 🛑 修改點 2：Popup 處理無資料狀態
         const buildRow = (icon, label, d) => {
             if(d.t <= 0) return '';
             const isNoData = d.a < 0;
-            const textCol = isNoData ? 'text-red-500' : (d.a <= 0 ? 'text-red-500' : 'text-green-600');
-            return `<div class="flex justify-between items-center border-b border-slate-100 py-1.5 last:border-0"><span class="text-slate-600 font-bold text-xs flex items-center gap-1.5"><span class="text-sm">${icon}</span> ${label}</span><span class="font-mono text-xs"><span class="font-black ${textCol}">${isNoData ? '無即時' : d.a}</span> <span class="text-slate-400 font-medium">/ ${d.t}</span></span></div>`;
+            
+            if (isNoData) {
+                return `<div class="flex justify-between items-center border-b border-slate-100 py-1.5 last:border-0">
+                            <span class="text-slate-600 font-bold text-xs flex items-center gap-1.5"><span class="text-sm">${icon}</span> ${label}</span>
+                            <span class="font-mono text-xs"><span class="font-black text-slate-500">共 ${d.t} 位</span> <span class="text-red-400 text-[10px] ml-1">(無即時資料)</span></span>
+                        </div>`;
+            } else {
+                const textCol = d.a <= 0 ? 'text-red-500' : 'text-green-600';
+                return `<div class="flex justify-between items-center border-b border-slate-100 py-1.5 last:border-0">
+                            <span class="text-slate-600 font-bold text-xs flex items-center gap-1.5"><span class="text-sm">${icon}</span> ${label}</span>
+                            <span class="font-mono text-xs"><span class="font-black ${textCol}">${d.a}</span> <span class="text-slate-400 font-medium">/ ${d.t}</span></span>
+                        </div>`;
+            }
         };
 
         const safeItemStr = encodeURIComponent(JSON.stringify(item));
@@ -506,18 +521,19 @@ function renderMapMarkers(data) {
             </div>
         `);
 
-        // 點擊地圖時，尋找對應卡片並加上藍框
         marker.on('click', () => {
             highlightCardInList(item.id);
         });
 
-        // 紀錄每一筆地標，方便「列表 ➡️ 地圖」連動時開啟 Popup
         window.markersMap[item.id] = marker;
         markers.push(marker);
     });
     markerCluster.addLayers(markers);
 }
 
+// ==========================================
+// 🛠️ 更新 2：更新下方列表清單 (renderList)
+// ==========================================
 function renderList(data, isUsingDest) {
     const listEl = document.getElementById('content-list');
     if (!listEl) return;
@@ -536,6 +552,11 @@ function renderList(data, isUsingDest) {
         
         const safeItemStr = encodeURIComponent(JSON.stringify(item));
 
+        // 🛑 修改點 3：處理列表的無資料顯示
+        const carStatusHtml = hasNoData 
+            ? `共 ${item.car.t} 位 <span class="text-[9px] font-normal ml-0.5">(無即時資料)</span>`
+            : `${item.car.a}/${item.car.t}`;
+
         listEl.innerHTML += `
             <div id="card-${item.id}" class="parking-card p-3 bg-white border border-slate-200 rounded-xl shadow-sm transition-all duration-300 ${isTopPick ? 'top-card' : ''}">
                 <div class="flex justify-between items-stretch">
@@ -549,7 +570,7 @@ function renderList(data, isUsingDest) {
                         <div class="bg-yellow-50 text-yellow-700 text-[9px] font-bold px-1.5 py-0.5 rounded mb-2 inline-block shadow-sm">🤖 ${item.prediction}</div>
          
                         <div class="flex flex-wrap gap-1 mb-2">
-                            <span class="text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm flex items-center gap-1 ${colorClass}">🚗 汽車 <span class="opacity-90">${hasNoData ? '?' : item.car.a}/${item.car.t}</span></span>
+                            <span class="text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm flex items-center gap-1 ${colorClass}">🚗 汽車 <span class="opacity-90">${carStatusHtml}</span></span>
                         </div>
                         <p class="text-[9px] text-blue-500 font-bold font-mono bg-blue-50 inline-block px-1.5 py-0.5 rounded">${distLabel} ${distStr}</p>
                         
@@ -788,7 +809,7 @@ function createSearchMarker(name, lat, lng, address = "") {
         offset: L.point(0, -35)
     });
     const searchQuery = address ? `${name} ${address}` : name;
-    const googleMapsUrl = `http://maps.google.com/?q=${encodeURIComponent(searchQuery)}`;
+    const googleMapsUrl = `http://maps.google.com/?q=$${encodeURIComponent(searchQuery)}`;
     const popupContent = `
         <div style="padding: 10px; font-family: sans-serif; min-w-[180px]; text-align: left;">
             <h4 style="margin: 0 0 4px 0; font-size: 14px; color: #1e293b; font-weight: bold;">🔍 ${name}</h4>
@@ -838,7 +859,6 @@ function buildSmartTransitBadge(item) {
             break;
     }
 
-    // ✨ 此處已加上判斷，若沒有文字說明就不會顯示
     return `
         <div class="mt-2.5 flex items-center gap-1.5 ${colorClass} border px-2.5 py-1.5 rounded-lg shadow-sm w-fit transition-all hover:scale-[1.02]">
             <span class="text-sm shadow-sm">${icon}</span>
