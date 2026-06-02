@@ -254,7 +254,8 @@ async function fetchTaipeiParkingData() {
 
             if (distToDest <= 0.8) {
                 const walkTime = Math.max(1, Math.ceil((distToDest * 1000) / 80));
-                mockTransit = { mode: 'walk', time: walkTime, desc: '符合步行優先法則，直接走最快！' };
+                // ✨ 將 desc 改為空字串，隱藏下方的小字說明
+                mockTransit = { mode: 'walk', time: walkTime, desc: '' };
             } else if (distToDest <= 2.5) {
                 const bikeTime = Math.max(5, Math.ceil((distToDest * 1000) / 200) + 4);
                 mockTransit = { mode: 'youbike', time: bikeTime, desc: '步行2分 → 騎乘YouBike → 步行2分' };
@@ -837,6 +838,7 @@ function buildSmartTransitBadge(item) {
             break;
     }
 
+    // ✨ 此處已加上判斷，若沒有文字說明就不會顯示
     return `
         <div class="mt-2.5 flex items-center gap-1.5 ${colorClass} border px-2.5 py-1.5 rounded-lg shadow-sm w-fit transition-all hover:scale-[1.02]">
             <span class="text-sm shadow-sm">${icon}</span>
@@ -845,7 +847,7 @@ function buildSmartTransitBadge(item) {
                     <span class="text-[11px] font-black tracking-wide">${label}</span>
                     <span class="text-[12px] font-black font-mono">約 ${item.transit.time} 分</span>
                 </div>
-                <span class="text-[9px] font-bold opacity-75 mt-[1px]">${item.transit.desc}</span>
+                ${item.transit.desc ? `<span class="text-[9px] font-bold opacity-75 mt-[1px]">${item.transit.desc}</span>` : ''}
             </div>
         </div>
     `;

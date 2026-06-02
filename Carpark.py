@@ -150,14 +150,14 @@ def calculate_best_transit_mode(distance: float, pure_walk_time: float, yb_data:
     # 預設最佳方案為步行
     best_mode = 'WALK'
     best_time = pure_walk_time
-    recommendation_reason = "純步行最為直接便利"
+    recommendation_reason = ""
 
-    # 規則一：步行優先法則 (大約 800m 內或 10 分鐘內)
+    # 規則一：距離較近時，預設為步行 (大約 800m 內或 10 分鐘內)
     if pure_walk_time <= 10 or distance <= 800:
         return {
             "mode": "WALK",
             "total_time": pure_walk_time,
-            "reason": "距離相當近，直接步行前往最有效率🚶"
+            "reason": ""
         }
 
     # 規則二：YouBike 真實時間校正
@@ -190,7 +190,7 @@ def calculate_best_transit_mode(distance: float, pure_walk_time: float, yb_data:
             return {
                 "mode": "WALK",
                 "total_time": pure_walk_time,
-                "reason": f"轉乘雖然快了 {int(time_saved)} 分鐘，但考量借還車流程，建議直接步行🚶"
+                "reason": ""
             }
 
     return {
