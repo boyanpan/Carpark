@@ -1,139 +1,205 @@
-/* 全域重置與 iOS 平滑化 */
+/* ==========================================================================
+   全域基礎與環境重置
+   ========================================================================== */
 html, body { 
     height: 100vh; 
     width: 100vw; 
     margin: 0; 
     padding: 0; 
-    background-color: #f8fafc;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
 }
 
+/* 隱藏原生滾動條以維持介面極簡度 */
 .no-scrollbar::-webkit-scrollbar { 
     display: none; 
 }
 
+/* 隱藏 OSRM 預設的雜亂導航路線文字面板 */
 .leaflet-routing-container { 
     display: none !important; 
 }
 
-/* 🚀 核心優化：硬體加速隔離層，避免重繪地圖時卡頓 */
-.layer-accelerated {
-    will-change: transform;
-    backface-visibility: hidden;
-    transform: translateZ(0);
-}
-
+/* 導航提示面板啟動動畫 */
 #nav-header.active { 
-    transform: translateY(0) translateZ(0); 
+    transform: translateY(0); 
 }
 
-/* Apple Maps 風格：精緻白淨的 Leaflet 彈窗 */
+/* ==========================================================================
+   Leaflet 地圖彈出視窗 (Popup) 規格化與表格排版
+   ========================================================================== */
 .leaflet-popup-content-wrapper { 
-    border-radius: 20px; 
+    border-radius: 16px; 
     padding: 0; 
-    box-shadow: 0 15px 40px rgba(15, 23, 42, 0.1); 
-    border: 1px solid rgba(241, 245, 249, 0.9); 
-    background: #ffffff;
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.15); 
+    border: 1px solid #e2e8f0; 
+    overflow: hidden;
 }
+
 .leaflet-popup-content { 
     margin: 0; 
-    width: auto !important; 
+    width: 320px !important; 
 }
+
 .leaflet-popup-close-button { 
     top: 14px !important; 
     right: 14px !important; 
     color: #94a3b8 !important; 
     font-size: 16px !important;
-}
-.leaflet-popup-tip {
-    background: #ffffff;
-    box-shadow: 0 5px 10px rgba(0,0,0,0.05);
+    transition: color 0.2s;
 }
 
-/* 🚘 汽車定位點特效 (純 Transform 縮放動畫，不傷 CPU) */
+.leaflet-popup-close-button:hover {
+    color: #475569 !important;
+}
+
+/* ==========================================================================
+   地圖自訂標記元件特效
+   ========================================================================== */
+/* 導航行車標記與翡翠綠擴散波紋 */
 .car-marker-container { 
     width: 44px; 
     height: 44px; 
     display: flex; 
     align-items: center; 
     justify-content: center; 
+    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1); 
 }
+
 .car-marker { 
-    font-size: 30px; 
-    filter: drop-shadow(0px 4px 8px rgba(15,23,42,0.15)); 
+    font-size: 32px; 
+    filter: drop-shadow(0px 4px 8px rgba(15, 23, 42, 0.35)); 
     line-height: 1; 
 }
+
 .car-marker-container::after { 
     content: ''; 
     position: absolute; 
-    width: 32px; 
-    height: 32px; 
-    background: rgba(37, 99, 235, 0.15); 
+    width: 36px; 
+    height: 36px; 
+    background: rgba(16, 185, 129, 0.35); 
     border-radius: 50%; 
     z-index: -1; 
-    animation: apple-pulse 2s cubic-bezier(0.16, 1, 0.3, 1) infinite; 
+    animation: pulseCircle 2s infinite; 
 }
 
-@keyframes apple-pulse { 
+@keyframes pulseCircle { 
     0% { transform: scale(0.8); opacity: 1; } 
     100% { transform: scale(2.2); opacity: 0; } 
 }
 
-/* 📌 目的地大頭針掉落與呼吸動畫 */
+/* 導航目的地大頭針規律彈跳 */
 .dest-marker-container { 
     display: flex; 
     align-items: center; 
     justify-content: center; 
     width: 42px; 
     height: 42px; 
-    animation: apple-bounce 0.5s infinite alternate cubic-bezier(0.25, 1, 0.5, 1); 
+    animation: bounceMarker 0.8s infinite alternate cubic-bezier(0.45, 0.05, 0.55, 0.95); 
 }
+
 .dest-marker { 
-    font-size: 36px; 
-    filter: drop-shadow(0px 8px 12px rgba(15,23,42,0.2)); 
+    font-size: 40px; 
+    filter: drop-shadow(0px 6px 6px rgba(0,0,0,0.3)); 
     line-height: 1; 
 }
 
-@keyframes apple-bounce { 
+@keyframes bounceMarker { 
     0% { transform: translateY(0); } 
-    100% { transform: translateY(-8px); } 
+    100% { transform: translateY(-14px); } 
 }
 
-/* 列表高亮選中卡片樣式 */
-.top-card { 
-    border: 2px solid #3b82f6 !important; 
-    background-color: #f8fafc !important; 
-    box-shadow: 0 8px 24px rgba(59, 130, 246, 0.06) !important;
-}
-
-/* 搜尋結果落下動畫 */
+/* 搜尋落點粉紅大頭針墜落動畫 */
 .target-marker-container { 
     display: flex; 
     justify-content: center; 
     align-items: flex-end; 
     width: 40px; 
-    height: 40px;
-    animation: dropDown 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; 
+    height: 40px; 
+    animation: pinDrop 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; 
 }
+
 .target-marker { 
-    font-size: 34px;
-    filter: drop-shadow(0 4px 8px rgba(0,0,0,0.12));
+    font-size: 38px; 
+    filter: drop-shadow(0px 4px 6px rgba(0,0,0,0.25)); 
 }
 
-@keyframes dropDown {
-    0% { transform: translateY(-80px); opacity: 0; }
-    100% { transform: translateY(0); opacity: 1; }
+@keyframes pinDrop { 
+    0% { transform: translateY(-100px); opacity: 0; } 
+    100% { transform: translateY(0); opacity: 1; } 
 }
 
-/* Leaflet 常駐店名標籤 */
-.custom-map-label {
-    background-color: #ffffff !important;
-    color: #0f172a !important;
-    border: 1px solid #e2e8f0 !important;
-    border-radius: 12px !important;
-    padding: 4px 10px !important;
-    font-size: 11px !important;
-    font-weight: 700 !important;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.05) !important;
-    white-space: nowrap !important;
+/* ==========================================================================
+   推薦標籤與選中高亮卡片樣式
+   ========================================================================== */
+.recommend-badge { 
+    background: #0f766e; /* 優雅的深湖綠，呈現沉穩知性美 */
+    color: white; 
+    padding: 2.5px 8px; 
+    border-radius: 6px; 
+    font-size: 10px; 
+    font-weight: 800; 
+    letter-spacing: 0.5px; 
+    box-shadow: 0 2px 6px rgba(15, 118, 110, 0.2); 
+}
+
+/* 地圖雙向連動高亮卡片樣式 */
+.top-card { 
+    border: 2px solid #0f766e !important; 
+    background-color: #f0fdf4 !important; /* 溫馨草本舒緩綠 */
+    box-shadow: 0 6px 16px rgba(15, 118, 110, 0.08) !important; 
+    transform: translateY(-2px);
+}
+
+/* 收藏星星互動 */
+.fav-star { 
+    cursor: pointer; 
+    transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), color 0.2s; 
+}
+
+.fav-star:hover { 
+    transform: scale(1.25); 
+}
+
+.fav-star.active { 
+    color: #eab308; 
+}
+
+.fav-star.inactive { 
+    color: #cbd5e1; 
+}
+
+/* 常駐地圖標籤樣式 */
+.custom-map-label { 
+    background-color: #ffffff !important; 
+    color: #0f766e !important; 
+    border: 1.5px solid #0f766e !important; 
+    border-radius: 20px !important; 
+    padding: 3px 9px !important; 
+    font-size: 12px !important; 
+    font-weight: bold !important; 
+    box-shadow: 0 4px 10px rgba(15,23,42,0.1) !important; 
+    white-space: nowrap !important; 
+}
+
+/* ==========================================================================
+   行動版拉簾適應性高度
+   ========================================================================== */
+@media (max-width: 767px) {
+    #sidebar-wrapper {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: auto;
+        z-index: 3000;
+        background: transparent;
+        box-shadow: none;
+    }
+    
+    #bottom-sheet {
+        height: 35vh;
+        transform: translateY(0);
+        transition: height 0.4s cubic-bezier(0.16, 1, 0.3, 1), transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
 }
