@@ -1,205 +1,93 @@
-/* ==========================================================================
-   全域基礎與環境重置
-   ========================================================================== */
-html, body { 
-    height: 100vh; 
-    width: 100vw; 
-    margin: 0; 
-    padding: 0; 
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    -webkit-font-smoothing: antialiased;
+/* 全域與重置 */
+html, body { height: 100vh; width: 100vw; margin: 0; padding: 0; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.leaflet-routing-container { display: none !important; }
+
+/* 導航提示框動畫 */
+#nav-header.active { transform: translateY(0); }
+
+/* 彈窗 (Popup) 美化 */
+.leaflet-popup-content-wrapper { border-radius: 12px; padding: 0; box-shadow: 0 8px 20px rgba(0,0,0,0.15); border: 1px solid #e2e8f0; }
+.leaflet-popup-content { margin: 0; width: auto !important; }
+.leaflet-popup-close-button { top: 10px !important; right: 10px !important; color: #94a3b8 !important; }
+
+/* 地圖圖示特效 */
+.car-marker-container { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; transition: transform 0.5s linear; }
+.car-marker { font-size: 32px; filter: drop-shadow(0px 4px 6px rgba(0,0,0,0.4)); line-height: 1; }
+.car-marker-container::after { content: ''; position: absolute; width: 34px; height: 34px; background: rgba(59, 130, 246, 0.4); border-radius: 50%; z-index: -1; animation: pulse 2s infinite; }
+@keyframes pulse { 0% { transform: scale(0.8); opacity: 1; } 100% { transform: scale(2); opacity: 0; } }
+
+.dest-marker-container { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; animation: bounce 0.8s infinite alternate cubic-bezier(0.5, 0.05, 1, 0.5); }
+.dest-marker { font-size: 40px; filter: drop-shadow(0px 5px 5px rgba(0,0,0,0.5)); line-height: 1; }
+@keyframes bounce { 0% { transform: translateY(0); } 100% { transform: translateY(-15px); } }
+
+/* 列表與卡片特效 */
+.recommend-badge { 
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); 
+    color: white; 
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 10px; 
+    font-weight: 900; 
+    letter-spacing: 0.5px; 
+    box-shadow: 0 2px 4px rgba(37, 99, 235, 0.3);
+}
+.top-card { 
+    border: 2px solid #3b82f6 !important; 
+    background-color: #f4f8ff !important; 
+    box-shadow: 0 4px 10px rgba(59,130,246,0.15) !important;
 }
 
-/* 隱藏原生滾動條以維持介面極簡度 */
-.no-scrollbar::-webkit-scrollbar { 
-    display: none; 
+/* 收藏星星 */
+.fav-star {
+    font-size: 18px;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+.fav-star:active {
+    transform: scale(1.3);
+}
+.fav-star.active {
+    color: #f59e0b;
+}
+.fav-star.inactive {
+    color: #cbd5e1;
 }
 
-/* 隱藏 OSRM 預設的雜亂導航路線文字面板 */
-.leaflet-routing-container { 
-    display: none !important; 
+/* 自訂地圖常駐店名標籤樣式 */
+.custom-map-label {
+    background-color: #ffffff !important;
+    color: #10b981 !important;
+    border: 2px solid #10b981 !important;
+    border-radius: 20px !important;
+    padding: 4px 10px !important;
+    font-size: 13px !important;
+    font-weight: bold !important;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15) !important;
+    white-space: nowrap !important;
 }
 
-/* 導航提示面板啟動動畫 */
-#nav-header.active { 
-    transform: translateY(0); 
+.custom-map-label::before {
+    border-right-color: #10b981 !important;
 }
 
-/* ==========================================================================
-   Leaflet 地圖彈出視窗 (Popup) 規格化與表格排版
-   ========================================================================== */
-.leaflet-popup-content-wrapper { 
-    border-radius: 16px; 
-    padding: 0; 
-    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.15); 
-    border: 1px solid #e2e8f0; 
-    overflow: hidden;
-}
-
-.leaflet-popup-content { 
-    margin: 0; 
-    width: 320px !important; 
-}
-
-.leaflet-popup-close-button { 
-    top: 14px !important; 
-    right: 14px !important; 
-    color: #94a3b8 !important; 
-    font-size: 16px !important;
-    transition: color 0.2s;
-}
-
-.leaflet-popup-close-button:hover {
-    color: #475569 !important;
-}
-
-/* ==========================================================================
-   地圖自訂標記元件特效
-   ========================================================================== */
-/* 導航行車標記與翡翠綠擴散波紋 */
-.car-marker-container { 
-    width: 44px; 
-    height: 44px; 
-    display: flex; 
-    align-items: center; 
-    justify-content: center; 
-    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1); 
-}
-
-.car-marker { 
-    font-size: 32px; 
-    filter: drop-shadow(0px 4px 8px rgba(15, 23, 42, 0.35)); 
-    line-height: 1; 
-}
-
-.car-marker-container::after { 
-    content: ''; 
-    position: absolute; 
-    width: 36px; 
-    height: 36px; 
-    background: rgba(16, 185, 129, 0.35); 
-    border-radius: 50%; 
-    z-index: -1; 
-    animation: pulseCircle 2s infinite; 
-}
-
-@keyframes pulseCircle { 
-    0% { transform: scale(0.8); opacity: 1; } 
-    100% { transform: scale(2.2); opacity: 0; } 
-}
-
-/* 導航目的地大頭針規律彈跳 */
-.dest-marker-container { 
-    display: flex; 
-    align-items: center; 
-    justify-content: center; 
-    width: 42px; 
-    height: 42px; 
-    animation: bounceMarker 0.8s infinite alternate cubic-bezier(0.45, 0.05, 0.55, 0.95); 
-}
-
-.dest-marker { 
-    font-size: 40px; 
-    filter: drop-shadow(0px 6px 6px rgba(0,0,0,0.3)); 
-    line-height: 1; 
-}
-
-@keyframes bounceMarker { 
-    0% { transform: translateY(0); } 
-    100% { transform: translateY(-14px); } 
-}
-
-/* 搜尋落點粉紅大頭針墜落動畫 */
+/* 搜尋結果粉紅大頭針的掉落特效 */
 .target-marker-container { 
     display: flex; 
     justify-content: center; 
     align-items: flex-end; 
     width: 40px; 
-    height: 40px; 
-    animation: pinDrop 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; 
+    height: 40px;
+    animation: dropDown 0.5s cubic-bezier(0.25, 1, 0.5, 1) forwards; 
 }
-
 .target-marker { 
-    font-size: 38px; 
-    filter: drop-shadow(0px 4px 6px rgba(0,0,0,0.25)); 
+    font-size: 36px;
+    filter: drop-shadow(0px 4px 6px rgba(0,0,0,0.3));
+    line-height: 1;
 }
-
-@keyframes pinDrop { 
-    0% { transform: translateY(-100px); opacity: 0; } 
-    100% { transform: translateY(0); opacity: 1; } 
-}
-
-/* ==========================================================================
-   推薦標籤與選中高亮卡片樣式
-   ========================================================================== */
-.recommend-badge { 
-    background: #0f766e; /* 優雅的深湖綠，呈現沉穩知性美 */
-    color: white; 
-    padding: 2.5px 8px; 
-    border-radius: 6px; 
-    font-size: 10px; 
-    font-weight: 800; 
-    letter-spacing: 0.5px; 
-    box-shadow: 0 2px 6px rgba(15, 118, 110, 0.2); 
-}
-
-/* 地圖雙向連動高亮卡片樣式 */
-.top-card { 
-    border: 2px solid #0f766e !important; 
-    background-color: #f0fdf4 !important; /* 溫馨草本舒緩綠 */
-    box-shadow: 0 6px 16px rgba(15, 118, 110, 0.08) !important; 
-    transform: translateY(-2px);
-}
-
-/* 收藏星星互動 */
-.fav-star { 
-    cursor: pointer; 
-    transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), color 0.2s; 
-}
-
-.fav-star:hover { 
-    transform: scale(1.25); 
-}
-
-.fav-star.active { 
-    color: #eab308; 
-}
-
-.fav-star.inactive { 
-    color: #cbd5e1; 
-}
-
-/* 常駐地圖標籤樣式 */
-.custom-map-label { 
-    background-color: #ffffff !important; 
-    color: #0f766e !important; 
-    border: 1.5px solid #0f766e !important; 
-    border-radius: 20px !important; 
-    padding: 3px 9px !important; 
-    font-size: 12px !important; 
-    font-weight: bold !important; 
-    box-shadow: 0 4px 10px rgba(15,23,42,0.1) !important; 
-    white-space: nowrap !important; 
-}
-
-/* ==========================================================================
-   行動版拉簾適應性高度
-   ========================================================================== */
-@media (max-width: 767px) {
-    #sidebar-wrapper {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        height: auto;
-        z-index: 3000;
-        background: transparent;
-        box-shadow: none;
-    }
-    
-    #bottom-sheet {
-        height: 35vh;
-        transform: translateY(0);
-        transition: height 0.4s cubic-bezier(0.16, 1, 0.3, 1), transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-    }
+@keyframes dropDown {
+    0% { transform: translateY(-100px); opacity: 0; }
+    60% { transform: translateY(10px); opacity: 1; }
+    80% { transform: translateY(-5px); }
+    100% { transform: translateY(0); }
 }

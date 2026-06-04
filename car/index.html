@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>P-Finder | 智能停車推薦系統</title>
+    <title>P-Finder | 智能停車推薦</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -12,91 +12,83 @@
     <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
-    <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
     <link rel="stylesheet" href="style.css">
 </head>
-<body class="bg-slate-50 overflow-hidden relative touch-none md:touch-auto">
+<body class="bg-slate-100 overflow-hidden relative touch-none md:touch-auto">
 
-    <div id="nav-header" class="fixed top-0 left-0 right-0 z-[4000] bg-slate-900 text-white p-3.5 shadow-2xl flex flex-col gap-2 transition-transform duration-300 transform -translate-y-full border-b-2 border-emerald-500">
+    <div id="nav-header" class="fixed top-0 left-0 right-0 z-[4000] bg-blue-700 text-white p-3 shadow-2xl flex flex-col gap-2 transition-transform duration-300 transform -translate-y-full">
         <div class="flex items-center gap-3">
-            <div class="w-12 h-12 flex items-center justify-center bg-white/10 rounded-xl border border-white/20 shrink-0">
+            <div class="w-12 h-12 flex items-center justify-center bg-white/20 rounded-xl border border-white/30 shrink-0">
                 <span id="nav-arrow" class="text-3xl font-bold">⬆️</span>
             </div>
             <div class="flex-1 overflow-hidden">
-                <p id="nav-instruction" class="text-base font-bold leading-tight truncate">正在規劃最佳行車路徑...</p>
-                <p id="nav-metrics" class="text-xs text-emerald-300 font-mono tracking-wide mt-1">計算中...</p>
+                <p id="nav-instruction" class="text-base font-bold leading-tight truncate">計算路徑中...</p>
+                <p id="nav-metrics" class="text-xs opacity-90 font-mono tracking-wide mt-1">計算中...</p>
             </div>
-            <button onclick="stopNavigation()" class="bg-rose-500 hover:bg-rose-600 text-white px-3 py-2 rounded-xl font-bold shadow-md transition active:scale-95 text-xs shrink-0">結束<br>導航</button>
+            <button onclick="stopNavigation()" class="bg-red-500 hover:bg-red-600 px-3 py-2 rounded-lg font-bold shadow-md transition active:scale-95 text-xs shrink-0">結束<br>導航</button>
         </div>
     </div>
-
-    <div id="map" class="absolute inset-0 w-full h-full z-0"></div>
 
     <div id="ui-container" class="absolute top-0 left-0 w-full h-full pointer-events-none flex flex-col md:flex-row z-[2000] overflow-hidden">
         
-        <div id="sidebar-wrapper" class="w-full md:w-[410px] h-full flex flex-col shrink-0 md:bg-white/95 md:backdrop-blur-md md:shadow-[6px_0_30px_rgba(15,23,42,0.15)] relative overflow-hidden">
+        <div id="sidebar-wrapper" class="w-full md:w-[400px] h-full flex flex-col justify-between md:justify-start shrink-0 md:bg-white md:shadow-[4px_0_24px_rgba(0,0,0,0.1)] relative overflow-hidden">
             
-            <div id="search-panel" class="pointer-events-auto bg-white p-4 shadow-md md:shadow-none rounded-b-2xl md:rounded-none z-50 transition-transform duration-300 ease-in-out shrink-0 border-b border-slate-100">
-                <div class="flex justify-between items-center mb-3.5">
-                    <div class="flex items-center gap-2">
-                        <h1 class="text-2xl font-black text-slate-800 tracking-tight font-serif italic">P-Finder</h1>
-                        <span class="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-bold border border-emerald-200">知性推薦版</span>
-                    </div>
-                    <div id="gps-status" class="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200">
-                        GPS 定位 <div id="gps-dot" class="w-2 h-2 bg-rose-500 rounded-full"></div>
+            <div id="search-panel" class="pointer-events-auto bg-white p-3 shadow-sm md:shadow-none rounded-b-2xl md:rounded-none z-50 transition-transform duration-300 ease-in-out shrink-0">
+                <div class="flex justify-between items-center mb-3">
+                    <h1 class="text-xl font-black text-blue-700 italic tracking-tighter">P-Finder</h1>
+                    <div id="gps-status" class="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded-md border">
+                        GPS <div id="gps-dot" class="w-2 h-2 bg-red-500 rounded-full"></div>
                     </div>
                 </div>
                 
-                <div class="flex flex-col gap-2.5">
-                    <div class="flex gap-2 relative">
+                <div class="flex flex-col gap-2">
+                    <div class="flex gap-1.5 relative">
                         <div class="relative flex-1">
-                            <input type="text" id="searchInput" autocomplete="off" onkeydown="if(event.key === 'Enter') searchLocation()" placeholder="搜尋學校、地點、超商或停車場..." class="w-full pl-3 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-slate-400 focus:bg-white transition shadow-inner">
-                            <button onclick="clearSearchAndLocate()" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition text-sm">✕</button>
-                            <div id="autocomplete-list" class="absolute left-0 right-0 top-full mt-1.5 bg-white border border-slate-200 rounded-xl shadow-2xl hidden max-h-[40vh] overflow-y-auto z-[5000] no-scrollbar"></div>
+                            <input type="text" id="searchInput" autocomplete="off" onkeydown="if(event.key === 'Enter') searchLocation()" placeholder="搜尋停車場、超商或地點..." class="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-400 focus:bg-blue-50 transition">
+                            <div id="autocomplete-list" class="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl hidden max-h-[40vh] overflow-y-auto z-[5000]"></div>
                         </div>
-                        <button onclick="searchLocation()" class="bg-slate-800 hover:bg-slate-900 text-white px-4 rounded-xl shadow-sm active:scale-95 transition text-sm font-medium">搜尋</button>
+                        <button onclick="searchLocation()" class="bg-blue-600 text-white px-4 rounded-lg shadow-sm active:bg-blue-800 text-sm font-bold shrink-0 transition">搜尋</button>
+                        <button onclick="clearSearchAndLocate()" class="bg-slate-100 hover:bg-slate-200 text-slate-600 px-2.5 rounded-lg border active:scale-95 transition shrink-0 text-sm">📍</button>
                     </div>
-
-                    <div class="grid grid-cols-2 gap-2.5">
-                        <div class="flex flex-col gap-1">
-                            <label class="text-[11px] font-bold text-slate-500 px-0.5">搜尋範圍半徑</label>
-                            <select id="radiusSelect" onchange="handleFilter()" class="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium outline-none focus:border-slate-400 transition cursor-pointer text-slate-700">
-                                <option value="300">300 公尺 (近距離)</option>
-                                <option value="500">500 公尺 (中距離)</option>
-                                <option value="1000" selected>1000 公尺 (標準)</option>
-                                <option value="2000">2000 公尺 (大範圍)</option>
-                                <option value="99999">不限距離</option>
-                            </select>
-                        </div>
-                        <div class="flex flex-col gap-1">
-                            <label class="text-[11px] font-bold text-slate-500 px-0.5">推薦排序模式</label>
-                            <select id="sortSelect" onchange="changeSortMode()" class="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium outline-none focus:border-slate-400 transition cursor-pointer text-slate-700">
-                                <option value="distance" selected>🎯 距離優先 (近➔遠)</option>
-                                <option value="price">💰 費率優先 (低➔高)</option>
-                            </select>
-                        </div>
+                    
+                    <div class="flex gap-2">
+                        <select id="radiusSelect" onchange="handleFilter()" class="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 outline-none focus:border-blue-400 transition">
+                            <option value="500">附近 500m</option>
+                            <option value="1000">附近 1km</option>
+                            <option value="2000" selected>附近 2km</option>
+                            <option value="5000">附近 5km</option>
+                            <option value="99999">全部範圍</option>
+                        </select>
+                        <select id="sortSelect" onchange="changeSortMode()" class="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 outline-none focus:border-blue-400 transition">
+                            <option value="distance">依距離排序</option>
+                            <option value="price">依價格排序</option>
+                        </select>
                     </div>
                 </div>
             </div>
 
-            <div id="bottom-sheet" class="pointer-events-auto bg-white flex flex-col flex-1 shadow-[0_-8px_30px_rgba(15,23,42,0.08)] md:shadow-none rounded-t-3xl md:rounded-none z-40 transition-transform duration-300 ease-in-out relative md:flex-1 overflow-hidden md:h-0 md:min-h-0">
-                
-                <div id="drag-handle" class="w-full h-7 flex justify-center items-center md:hidden cursor-pointer shrink-0" onclick="toggleBottomSheet()">
-                    <div class="w-12 h-1 bg-slate-300 rounded-full"></div>
+            <div id="bottom-sheet" class="pointer-events-auto bg-white rounded-t-3xl md:rounded-none shadow-[0_-8px_30px_rgba(0,0,0,0.08)] md:shadow-none flex flex-col z-40 transition-transform duration-300 ease-in-out relative md:flex-1 overflow-hidden h-[35vh] md:h-auto">
+                <div id="drag-handle" class="w-full h-8 flex justify-center items-center md:hidden cursor-pointer shrink-0" onclick="toggleBottomSheet()">
+                    <svg id="sheet-arrow" class="w-7 h-7 text-slate-400 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 15l7-7 7 7"></path>
+                    </svg>
                 </div>
 
-                <div class="flex border-b border-slate-100 text-center text-sm font-bold text-slate-400 shrink-0 bg-slate-50/50">
-                    <button onclick="switchTab('search')" id="tab-search" class="flex-1 py-3 text-slate-800 border-b-2 border-slate-800 transition-all">周邊推薦車位</button>
-                    <button onclick="switchTab('fav')" id="tab-fav" class="flex-1 py-3 border-b-2 border-transparent hover:text-slate-600 transition-all">我的收藏專區</button>
+                <div class="flex border-b border-t md:border-t-0 text-center text-sm font-bold text-slate-400 shrink-0">
+                    <button onclick="switchTab('search')" id="tab-search" class="flex-1 py-2.5 text-blue-600 border-b-2 border-blue-600">附近推薦</button>
+                    <button onclick="switchTab('fav')" id="tab-fav" class="flex-1 py-2.5 border-b-2 border-transparent">我的收藏</button>
                 </div>
 
-                <div id="content-list" class="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/30 md:bg-white no-scrollbar pb-12 overscroll-y-contain">
+                <div id="content-list" class="flex-1 overflow-y-auto p-3 space-y-2.5 bg-slate-50/50 md:bg-white no-scrollbar pb-10 overscroll-contain">
                     </div>
             </div>
-
+            
         </div>
     </div>
+
+    <div id="map" class="w-full h-full absolute inset-0 z-0"></div>
 
     <script src="script.js"></script>
 </body>
