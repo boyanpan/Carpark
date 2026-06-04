@@ -1,120 +1,161 @@
-/* 全域與重置 */
-html, body { height: 100vh; width: 100vw; margin: 0; padding: 0; }
+/* ==========================================================================
+   賽博極客炫酷暗黑風主樣式表 (Tech Dark Mode Core CSS)
+   ========================================================================== */
+
+/* 全域基礎重置與酷炫黑化滾動條 */
+html, body { 
+    height: 100vh; 
+    width: 100vw; 
+    margin: 0; 
+    padding: 0; 
+    background-color: #0a0f1d;
+}
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .leaflet-routing-container { display: none !important; }
 
-/* 導航提示框動畫 */
+/* 導航提示框動畫架構 */
 #nav-header.active { transform: translateY(0); }
 
-/* 彈窗 (Popup) 美化 */
-.leaflet-popup-content-wrapper { border-radius: 12px; padding: 0; box-shadow: 0 8px 20px rgba(0,0,0,0.15); border: 1px solid #e2e8f0; }
+/* 🌟 Leaflet 地圖彈窗 (Popup) 全面黑化高科技美化 */
+.leaflet-popup-content-wrapper { 
+    background-color: #111827 !important; 
+    border: 1px solid #06b6d4 !important; 
+    box-shadow: 0 0 25px rgba(6, 182, 212, 0.35) !important; 
+    border-radius: 12px; 
+    padding: 0;
+    color: #f1f5f9;
+}
 .leaflet-popup-content { margin: 0; width: auto !important; }
-.leaflet-popup-close-button { top: 10px !important; right: 10px !important; color: #94a3b8 !important; }
+.leaflet-popup-tip {
+    background-color: #111827 !important;
+    border-left: 1px solid #06b6d4 !important;
+    border-bottom: 1px solid #06b6d4 !important;
+}
+.leaflet-popup-close-button { 
+    top: 12px !important; 
+    right: 12px !important; 
+    color: #06b6d4 !important; 
+    font-size: 14px !important;
+    transition: all 0.2s;
+}
+.leaflet-popup-close-button:hover {
+    color: #f43f5e !important;
+    text-shadow: 0 0 8px #f43f5e;
+}
 
-/* 地圖圖示特效 */
-.car-marker-container { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; transition: transform 0.5s linear; }
-.car-marker { font-size: 32px; filter: drop-shadow(0px 4px 6px rgba(0,0,0,0.4)); line-height: 1; }
-.car-marker-container::after { content: ''; position: absolute; width: 34px; height: 34px; background: rgba(59, 130, 246, 0.4); border-radius: 50%; z-index: -1; animation: pulse 2s infinite; }
-@keyframes pulse { 0% { transform: scale(0.8); opacity: 1; } 100% { transform: scale(2); opacity: 0; } }
+/* 🚘 定位車輛車頭朝向動態科技環特效 */
+.car-marker-container { 
+    width: 46px; 
+    height: 46px; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    transition: transform 0.4s linear; 
+}
+.car-marker { 
+    font-size: 32px; 
+    filter: drop-shadow(0px 0px 8px #06b6d4); 
+    line-height: 1; 
+}
+.car-marker-container::after { 
+    content: ''; 
+    position: absolute; 
+    width: 36px; 
+    height: 36px; 
+    background: rgba(6, 182, 212, 0.25); 
+    border: 1.5px solid #06b6d4;
+    border-radius: 50%;
+    z-index: -1; 
+    box-shadow: 0 0 15px rgba(6, 182, 212, 0.6);
+    animation: cyberPulse 2s infinite ease-out; 
+}
+@keyframes cyberPulse { 
+    0% { transform: scale(0.8); opacity: 1; } 
+    100% { transform: scale(2.2); opacity: 0; } 
+}
 
-.dest-marker-container { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; animation: bounce 0.8s infinite alternate cubic-bezier(0.5, 0.05, 1, 0.5); }
-.dest-marker { font-size: 40px; filter: drop-shadow(0px 5px 5px rgba(0,0,0,0.5)); line-height: 1; }
-@keyframes bounce { 0% { transform: translateY(0); } 100% { transform: translateY(-15px); } }
+/* 🎯 搜尋目標點粉紅極光大頭針跳動與掉落特效 */
+.dest-marker-container { 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    width: 44px; 
+    height: 44px;
+    animation: cyberBounce 0.8s infinite alternate cubic-bezier(0.45, 0.05, 0.55, 0.95); 
+}
+.dest-marker { 
+    font-size: 42px; 
+    filter: drop-shadow(0px 0px 10px #f43f5e); 
+    line-height: 1; 
+}
+@keyframes cyberBounce { 
+    0% { transform: translateY(0); } 
+    100% { transform: translateY(-14px); } 
+}
 
-/* 列表特效 */
+/* 列表推薦動態霓虹標籤 */
 .recommend-badge { 
-    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); 
-    color: white; 
-    padding: 3px 8px; 
+    background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%); 
+    color: #020617; 
+    padding: 3px 9px;
     border-radius: 6px;
     font-size: 10px; 
     font-weight: 900; 
-    letter-spacing: 0.5px; 
-    box-shadow: 0 2px 4px rgba(37, 99, 235, 0.3);
+    letter-spacing: 1px; 
+    box-shadow: 0 0 12px rgba(6, 182, 212, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.2);
 }
+
+/* 🌟 地圖反向連動：被選中卡片之發光高亮外框 */
 .top-card { 
-    border: 2px solid #3b82f6 !important; 
-    background-color: #f4f8ff !important; 
-    box-shadow: 0 4px 10px rgba(59,130,246,0.15) !important;
+    border: 2px solid #06b6d4 !important; 
+    background-color: rgba(6, 182, 212, 0.08) !important; 
+    box-shadow: 0 0 20px rgba(6, 182, 212, 0.3) !important;
+    transform: scale(1.01);
 }
 
-/* 抽屜預設樣式 (桌面版滾動修復) */
-@media (min-width: 768px) {
-    #bottom-sheet { 
-        height: auto !important;
-        min-height: 0 !important; 
-        flex: 1 !important; 
-        transform: none !important; 
-    }
-    body { touch-action: auto; }
-}
-
-/* 🌟 新增：收藏系統專用小星星樣式 */
-.fav-star {
-    font-size: 18px;
-    cursor: pointer;
-    transition: transform 0.2s, color 0.2s;
-}
-.fav-star:active {
-    transform: scale(1.3);
-}
-.fav-star.active {
-    color: #eab308;
-}
-.fav-star.inactive {
-    color: #cbd5e1;
-}
-
-/* 🌟 自訂地圖常駐店名標籤樣式 */
+/* 🌟 地圖常駐標籤之數值電子看板樣式調修 */
 .custom-map-label {
-    background-color: #ffffff !important;
-    color: #10b981 !important;
-    border: 2px solid #10b981 !important;
-    border-radius: 20px !important;
+    background-color: #0f172a !important;
+    color: #06b6d4 !important;
+    border: 1px solid #06b6d4 !important;
+    border-radius: 6px !important;
     padding: 4px 10px !important;
-    font-size: 13px !important;
+    font-size: 12px !important;
     font-weight: bold !important;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.15) !important;
+    font-family: 'Courier New', Courier, monospace !important;
+    box-shadow: 0 0 10px rgba(6, 182, 212, 0.5) !important;
     white-space: nowrap !important;
 }
-
 .custom-map-label::before {
-    border-right-color: #10b981 !important;
+    border-right-color: #06b6d4 !important;
 }
 
-/* 搜尋結果粉紅大頭針的掉落特效 */
-.target-marker-container { 
-    display: flex; 
-    justify-content: center; 
-    align-items: flex-end; 
-    width: 40px; 
-    height: 40px;
-    animation: dropDown 0.5s cubic-bezier(0.25, 1, 0.5, 1) forwards; 
-}
-.target-marker { 
-    font-size: 36px;
-    filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.4)); 
-    line-height: 1; 
-}
-@keyframes dropDown { 
-    0% { transform: translateY(-30px); opacity: 0; }
-    100% { transform: translateY(0); opacity: 1; }
-}
-.custom-div-icon { 
-    background: none !important; 
-    border: none !important;
+/* 搜尋下拉選單項目的 Hover 賽博藍 */
+.autocomplete-item:hover {
+    background-color: rgba(6, 182, 212, 0.15) !important;
+    color: #22d3ee !important;
 }
 
-/* 🔧 修正搜尋標籤的小箭頭位置與顏色 */
-.leaflet-tooltip-top.custom-map-label::before {
-    border-top-color: #10b981 !important;
-    bottom: -10px !important;
-    left: 50% !important;
-    transform: translateX(-50%) !important;
+/* 行動端抽屜預設樣式 (桌面版架構自適應穩定) */
+@media (min-width: 768px) {
+    #bottom-sheet { 
+        height: auto !important; 
+        min-height: 0 !important; 
+        flex: 1 !important;
+        transform: none !important;
+        border-radius: 0 !important;
+    }
 }
-
-/* 確保 Leaflet 預設的邊框干擾被清除 */
-.leaflet-tooltip.custom-map-label {
-    background-color: #ffffff !important;
-    border: 2px solid #10b981 !important;
+@media (max-width: 767px) {
+    #bottom-sheet {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 35vh;
+        z-index: 3000;
+        border-radius: 20px 20px 0 0;
+        transition: height 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.1);
+    }
 }
