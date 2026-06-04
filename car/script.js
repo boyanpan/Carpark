@@ -401,7 +401,8 @@ function handleFilter() {
         data = data.map(p => ({ ...p, distance: calculateDistance(refLocation[0], refLocation[1], p.lat, p.lng) }));
         if (!window.currentKeyword && radiusMeters < 99999) {
             data = data.filter(p => p.distance <= (radiusMeters / 1000));
-            radiusCircle = L.circle(refLocation, { color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.08, radius: radiusMeters, weight: 1.5 }).addTo(map);
+            // 請找到這一行，將顏色改為優雅墨藍與溫柔襯底透明度
+        radiusCircle = L.circle(refLocation, { color: '#1b2a47', fillColor: '#1b2a47', fillOpacity: 0.05, radius: radiusMeters, weight: 1.5 }).addTo(map);
         }
 
         if (currentSortMode === 'distance') {
@@ -457,10 +458,8 @@ function renderMapMarkers(data) {
     data.forEach(item => {
         const isFull = item.car.a === 0;
         
-        // 🛑 修改點 1：將原本的灰底 '#94a3b8' 替換為真實停車標誌深藍 '#1d4ed8'
-        const color = item.car.a < 0 ? '#1d4ed8' : (isFull ? '#ef4444' : (item.car.a <= 10 ? '#f59e0b' : '#10b981'));
-        
-        // 將原本的 '?' 替換為 'P'
+        // 🎨 溫馨微可愛狀態色彩優化：學院墨藍(無即時)、柔和草莓紅(客滿)、焦糖琥珀(車位緊縮)、森林松綠(車位充足)
+        const color = item.car.a < 0 ? '#1b2a47' : (isFull ? '#e11d48' : (item.car.a <= 10 ? '#d97706' : '#0d9488'));
         const displayNum = item.car.a < 0 ? 'P' : item.car.a;
 
         const textStr = String(displayNum);
@@ -471,61 +470,50 @@ function renderMapMarkers(data) {
 
         const marker = L.marker([item.lat, item.lng], {
             icon: L.divIcon({
-                html: `<div style="background-color: ${color}; color: white; font-weight: 900; font-size: 11px; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; border-radius: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); border: 1.5px solid white; box-sizing: border-box; white-space: nowrap;">${displayNum}</div>`,
+                html: `<div style="background-color: ${color}; color: #fdfbf7; font-weight: 800; font-size: 11px; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; border-radius: 10px; box-shadow: 0 3px 8px rgba(43,34,27,0.25); border: 2px solid #fffdfb; box-sizing: border-box; white-space: nowrap;">${displayNum}</div>`,
                 className: 'custom-parking-marker',
                 iconSize: [iconWidth, iconHeight],
                 iconAnchor: [iconWidth / 2, iconHeight / 2]
             })
         });
 
-        // Popup 處理無資料狀態
         const buildRow = (icon, label, d) => {
             if(d.t <= 0) return '';
             const isNoData = d.a < 0;
-            
             if (isNoData) {
-                return `<div class="flex justify-between items-center border-b border-slate-100 py-1.5 last:border-0">
-                            <span class="text-slate-600 font-bold text-xs flex items-center gap-1.5"><span class="text-sm">${icon}</span> ${label}</span>
-                            <span class="font-mono text-xs"><span class="font-black text-slate-500">共 ${d.t} 位</span> <span class="text-red-400 text-[10px] ml-1">(無即時資料)</span></span>
+                return `<div class="flex justify-between items-center border-b border-stone-100 py-1.5 last:border-0">
+                            <span class="text-stone-600 font-bold text-xs flex items-center gap-1.5"><span class="text-sm">${icon}</span> ${label}</span>
+                            <span class="font-mono text-xs"><span class="font-black text-stone-400">共 ${d.t} 位</span> <span class="text-stone-400 text-[10px] ml-1">(無即時資料)</span></span>
                         </div>`;
             } else {
-                const textCol = d.a <= 0 ? 'text-red-500' : 'text-green-600';
-                return `<div class="flex justify-between items-center border-b border-slate-100 py-1.5 last:border-0">
-                            <span class="text-slate-600 font-bold text-xs flex items-center gap-1.5"><span class="text-sm">${icon}</span> ${label}</span>
-                            <span class="font-mono text-xs"><span class="font-black ${textCol}">${d.a}</span> <span class="text-slate-400 font-medium">/ ${d.t}</span></span>
+                const textCol = d.a <= 0 ? 'text-[#e11d48]' : 'text-[#0d9488]';
+                return `<div class="flex justify-between items-center border-b border-stone-100 py-1.5 last:border-0">
+                            <span class="text-stone-600 font-bold text-xs flex items-center gap-1.5"><span class="text-sm">${icon}</span> ${label}</span>
+                            <span class="font-mono text-xs"><span class="font-black ${textCol}">${d.a}</span> <span class="text-stone-400 font-medium">/ ${d.t}</span></span>
                         </div>`;
             }
         };
-
         const safeItemStr = encodeURIComponent(JSON.stringify(item));
 
         marker.bindPopup(`
-            <div class="p-3.5 min-w-[240px] bg-white">
+            <div class="p-3.5 min-w-[240px] bg-[#fffdfb]">
                 <div class="flex justify-between items-start mb-1 pr-4">
-                    <h3 class="font-black text-base text-blue-700 leading-tight">${item.name}</h3>
+                    <h3 class="font-black text-base text-[#1b2a47] leading-tight font-serif">${item.name}</h3>
                 </div>
-                
-                <span class="inline-block text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold mb-2">${item.category}</span>
-                <p class="text-[10px] text-slate-500 mb-2 flex items-center gap-1 font-medium"><span class="text-pink-500 text-xs">📍</span>${item.address}</p>
-                <div class="bg-slate-50 rounded-lg px-2.5 border border-slate-100 mb-2 shadow-inner">
+                <span class="inline-block text-[9px] bg-[#f4ece1] text-[#7c664e] px-1.5 py-0.5 rounded-md font-bold mb-2 border border-[#dcd1c0]/40">${item.category}</span>
+                <p class="text-[10px] text-stone-500 mb-2 flex items-center gap-1 font-medium">📍 ${item.address}</p>
+                <div class="bg-[#fbf9f6] rounded-xl px-2.5 border border-[#e6dfd5] mb-2 shadow-inner">
                     ${buildRow('🚗', '汽車', item.car)}
                 </div>
-     
-                <div class="bg-yellow-50 text-yellow-700 text-[10px] font-bold p-2.5 rounded-lg border border-yellow-100 mb-2 text-center shadow-sm">🤖 ${item.prediction}</div>
+                <div class="bg-[#fffbeb] text-[#b45309] text-[10px] font-bold p-2.5 rounded-xl border border-[#fef3c7] mb-2 text-center shadow-sm">🤖 ${item.prediction}</div>
                 ${buildSmartTransitBadge(item)}
-                
-                <div class="text-slate-700 text-[10px] bg-slate-50 p-2 rounded-md border border-slate-100 leading-relaxed whitespace-pre-line shadow-sm max-h-[120px] overflow-y-auto no-scrollbar mt-2 mb-3">💰 ${item.payex}</div>
-                
-                <button onclick="startNav('${safeItemStr}')" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-xs font-black shadow-md active:scale-95 transition flex items-center justify-center gap-1.5">
+                <div class="text-stone-700 text-[10px] bg-[#fbf9f6] p-2.5 rounded-xl border border-[#e6dfd5] leading-relaxed whitespace-pre-line shadow-sm max-h-[120px] overflow-y-auto no-scrollbar mt-2 mb-3">💰 ${item.payex}</div>
+                <button onclick="startNav('${safeItemStr}')" class="w-full bg-[#1b2a47] hover:bg-[#2c3e60] text-[#fdfbf7] py-2.5 rounded-xl text-xs font-black shadow-md active:scale-95 transition flex items-center justify-center gap-1.5">
                     🧭 開始導航
                 </button>
             </div>
         `);
-
-        marker.on('click', () => {
-            highlightCardInList(item.id);
-        });
-
+        marker.on('click', () => { highlightCardInList(item.id); });
         window.markersMap[item.id] = marker;
         markers.push(marker);
     });
@@ -538,55 +526,45 @@ function renderMapMarkers(data) {
 function renderList(data, isUsingDest) {
     const listEl = document.getElementById('content-list');
     if (!listEl) return;
-    if (!data.length) return listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold">範圍內查無停車場</div>`;
+    if (!data.length) return listEl.innerHTML = `<div class="text-center py-20 text-stone-400 font-bold font-serif">範圍內查無停車場 📖</div>`;
     listEl.innerHTML = "";
-    
     data.forEach((item, index) => {
         const isFull = item.car.a === 0, hasNoData = item.car.a < 0;
         
-        // 🛑 修改點 2：將原本的 bg-slate-400 替換為深藍色 bg-blue-700
-        const colorClass = hasNoData ? 'bg-blue-700 text-white' : (isFull ? 'bg-red-500 text-white' : 'bg-emerald-500 text-white');
-        
+        // 🎨 色彩統一調整：學院墨藍(無資料)、溫馨草莓紅(滿車)、質感森林綠(有車位)
+        const colorClass = hasNoData ? 'bg-[#1b2a47] text-[#fdfbf7]' : (isFull ? 'bg-[#e11d48] text-white' : 'bg-[#0d9488] text-white');
         const isFav = favorites.includes(item.id);
         const distStr = item.distance ? `${item.distance.toFixed(2)} km` : "計算中";
         const distLabel = isUsingDest ? "📍 距目的地:" : "📍 距您目前:";
-        
         const isTopPick = (index === 0 && !isFull && !hasNoData);
         const badgeLabelText = (currentSortMode === 'price') ? '💰 最便宜' : '🎯 距離最近';
-        
         const safeItemStr = encodeURIComponent(JSON.stringify(item));
 
-        // 處理列表的無資料顯示
         const carStatusHtml = hasNoData 
             ? `共 ${item.car.t} 位 <span class="text-[9px] font-normal ml-0.5">(無即時資料)</span>`
             : `${item.car.a}/${item.car.t}`;
 
         listEl.innerHTML += `
-            <div id="card-${item.id}" class="parking-card p-3 bg-white border border-slate-200 rounded-xl shadow-sm transition-all duration-300 ${isTopPick ? 'top-card' : ''}">
+            <div id="card-${item.id}" class="parking-card p-4 bg-[#fffdfb] border border-[#e6dfd5] rounded-2xl shadow-sm transition-all duration-300 ${isTopPick ? 'top-card' : ''}">
                 <div class="flex justify-between items-stretch">
                     <div class="cursor-pointer flex-1 pr-2" onclick="selectCard('${item.id}', ${item.lat}, ${item.lng})">
-                        <div class="flex items-center gap-2 mb-1">
-                            <h3 class="font-black text-slate-800 leading-tight text-sm">${item.name}</h3>
-                            <span class="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold">${item.category}</span>
+                        <div class="flex items-center gap-2 mb-1.5">
+                            <h3 class="font-black text-stone-800 leading-tight text-sm">${item.name}</h3>
+                            <span class="text-[9px] bg-[#f4ece1] text-[#7c664e] px-1.5 py-0.5 rounded-md font-bold">${item.category}</span>
                             ${isTopPick ? `<span class="recommend-badge shrink-0">${badgeLabelText}</span>` : ''}
                         </div>
-                        <p class="text-[9px] text-slate-400 mb-2 truncate">${item.address}</p>
-                        <div class="bg-yellow-50 text-yellow-700 text-[9px] font-bold px-1.5 py-0.5 rounded mb-2 inline-block shadow-sm">🤖 ${item.prediction}</div>
-         
+                        <p class="text-[10px] text-stone-400 mb-2 truncate">📍 ${item.address}</p>
+                        <div class="bg-[#fffbeb] text-[#b45309] text-[10px] font-bold px-2 py-0.5 rounded-md mb-2 inline-block shadow-sm border border-[#fef3c7]">🤖 ${item.prediction}</div>
                         <div class="flex flex-wrap gap-1 mb-2">
-                            <span class="text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm flex items-center gap-1 ${colorClass}">🚗 汽車 <span class="opacity-90">${carStatusHtml}</span></span>
+                            <span class="text-[10px] font-bold px-2 py-1 rounded-lg shadow-sm flex items-center gap-1 ${colorClass}">🚗 汽車 <span class="opacity-95">${carStatusHtml}</span></span>
                         </div>
-                        <p class="text-[9px] text-blue-500 font-bold font-mono bg-blue-50 inline-block px-1.5 py-0.5 rounded">${distLabel} ${distStr}</p>
-                        
+                        <p class="text-[10px] text-[#1b2a47] font-bold font-mono bg-[#f4ece1]/50 inline-block px-2 py-0.5 rounded-md">${distLabel} ${distStr}</p>
                         ${buildSmartTransitBadge(item)}
                     </div>
-                    
-                    <div class="flex flex-col items-center justify-between shrink-0 border-l border-slate-100 pl-3 ml-1">
+                    <div class="flex flex-col items-center justify-between shrink-0 border-l border-[#e6dfd5]/60 pl-3 ml-1">
                         <button onclick="toggleFav('${item.id}')" class="text-xl active:scale-75 transition pt-1" title="加入/移除收藏">${isFav ? '🩷' : '🤍'}</button>
-                        
-                        <button onclick="startNav('${safeItemStr}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-[11px] font-black shadow-md active:scale-95 transition flex flex-col items-center gap-1 mt-3">
-                            <span class="text-sm leading-none">🧭</span>
-                            導航
+                        <button onclick="startNav('${safeItemStr}')" class="bg-[#1b2a47] hover:bg-[#2c3e60] text-[#fdfbf7] px-3 py-2 rounded-xl text-[11px] font-black shadow-md active:scale-95 transition flex flex-col items-center gap-1 mt-3">
+                            <span class="text-sm leading-none">🧭</span> 導航
                         </button>
                     </div>
                 </div>
@@ -644,7 +622,8 @@ function updateRoute() {
             if (i === n - 1) return L.marker(waypoint.latLng, { icon: L.divIcon({ html: `<div class="dest-marker-container"><div class="dest-marker">🚩</div></div>`, className: 'custom-div-icon', iconAnchor: [20, 40] }), zIndexOffset: 1000 });
             return null; 
         }, 
-        lineOptions: { styles: [{ color: '#3b82f6', weight: 8, opacity: 0.8 }] },
+        // 請找到 L.Routing.control 裡面的 lineOptions 或是相關樣式，將顏色修改為：
+        lineOptions: { styles: [{ color: '#1b2a47', weight: 8, opacity: 0.8 }] },
         show: false, addWaypoints: false,
         router: L.Routing.osrmv1({ serviceUrl: 'https://router.project-osrm.org/route/v1', profile: 'driving' }) 
     }).on('routesfound', (e) => {
@@ -693,15 +672,14 @@ window.switchTab = function(tab) {
     currentTab = tab;
     const tabSearch = document.getElementById('tab-search');
     const tabFav = document.getElementById('tab-fav');
-    
     if (tabSearch) {
-        tabSearch.classList.toggle('text-blue-600', tab === 'search');
-        tabSearch.classList.toggle('border-blue-600', tab === 'search');
+        tabSearch.classList.toggle('text-[#1b2a47]', tab === 'search');
+        tabSearch.classList.toggle('border-[#1b2a47]', tab === 'search');
         tabSearch.classList.toggle('border-transparent', tab !== 'search');
     }
     if (tabFav) {
-        tabFav.classList.toggle('text-blue-600', tab === 'fav');
-        tabFav.classList.toggle('border-blue-600', tab === 'fav');
+        tabFav.classList.toggle('text-[#1b2a47]', tab === 'fav');
+        tabFav.classList.toggle('border-[#1b2a47]', tab === 'fav');
         tabFav.classList.toggle('border-transparent', tab !== 'fav');
     }
     handleFilter();
@@ -743,25 +721,24 @@ function initAutocomplete() {
                     autocompleteList.innerHTML = '';
                     
                     const searchAllDiv = document.createElement('div');
-                    searchAllDiv.className = 'p-3 hover:bg-blue-50 cursor-pointer border-b border-slate-100 flex items-center gap-3 transition';
+                    searchAllDiv.className = 'p-3 hover:bg-[#f4ece1]/40 cursor-pointer border-b border-[#e6dfd5]/40 flex items-center gap-3 transition';
                     searchAllDiv.innerHTML = `
-                        <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold flex-shrink-0">🔍</div>
-                        <div class="text-sm text-slate-800 font-bold flex-1">搜尋「${query}」台北周邊車位</div>
-                    `;
+                            <div class="w-8 h-8 rounded-full bg-[#f4ece1] text-[#1b2a47] flex items-center justify-center font-bold flex-shrink-0">🔍</div>
+                            <div class="text-sm text-stone-800 font-bold flex-1">搜尋「${query}」台北周邊車位</div>`;
                     searchAllDiv.addEventListener('click', () => { autocompleteList.classList.add('hidden'); searchLocation(); });
                     autocompleteList.appendChild(searchAllDiv);
 
                     suggestions.forEach(place => {
                         const div = document.createElement('div');
-                        div.className = 'p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0 flex items-center gap-3 transition';
-                        
+                        // 聯想清單的迴圈生成處更改：
+                        div.className = 'p-3 hover:bg-[#faf6f0] cursor-pointer border-b border-[#e6dfd5]/40 last:border-0 flex items-center gap-3 transition';
                         div.innerHTML = `
-                            <div class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-bold flex-shrink-0">📍</div>
+                            <div class="w-8 h-8 rounded-full bg-[#fbf9f6] text-stone-500 flex items-center justify-center font-bold flex-shrink-0">📍</div>
                             <div class="flex flex-col overflow-hidden flex-1">
-                                <div class="text-sm text-slate-800 font-bold truncate">${place.name}</div>
-                                <div class="text-[11px] text-slate-400 truncate">${place.address}</div>
-                            </div>
-                        `;
+                            <div class="text-sm text-stone-800 font-bold truncate">${place.name}</div>
+                            <div class="text-[11px] text-stone-400 truncate">${place.address}</div>
+                        </div>
+`;
                         
                         div.addEventListener('click', () => {
                             searchInput.value = place.name; 
