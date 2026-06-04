@@ -570,20 +570,12 @@ function renderList(data, isUsingDest) {
                         <button onclick="toggleFav('${item.id}')" class="text-xl active:scale-75 transition pt-1" title="加入/移除收藏">${isFav ? '🩷' : '🤍'}</button>
                         <button onclick="startNav('${safeItemStr}')" class="bg-[#1b2a47] hover:bg-[#2c3e60] text-[#fdfbf7] px-3 py-2 rounded-xl text-[11px] font-black shadow-md active:scale-95 transition flex flex-col items-center gap-1 mt-3">
                             <span class="text-sm leading-none">🧭</span> 導航
+
                         </button>
-                    </div>
-                    <div class="flex flex-col items-center justify-between shrink-0 border-l border-[#e6dfd5]/60 pl-3 ml-1">
-                        <button onclick="toggleFav('${item.id}')" class="text-xl active:scale-75 transition pt-1" title="加入/移除收藏">${isFav ? '🩷' : '🤍'}</button>
-    
                         <a href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${item.lat},${item.lng}" target="_blank" class="bg-[#0d9488] hover:bg-[#115e59] text-[#fdfbf7] px-2 py-1.5 rounded-xl text-[10px] font-black shadow-md active:scale-95 transition flex items-center gap-1 mt-2 text-center no-underline" title="入口街景">
                         🗺️ 街景
                         </a>
-    
-                    <button onclick="startNav('${safeItemStr}')" class="bg-[#1b2a47] hover:bg-[#2c3e60] text-[#fdfbf7] px-3 py-2 rounded-xl text-[11px] font-black shadow-md active:scale-95 transition flex flex-col items-center gap-1 mt-2">
-                        <span class="text-sm leading-none">🧭</span> 導航
-    </button>
-</div>
-                </div>
+                    </div>
             </div>`;
     });
 }
