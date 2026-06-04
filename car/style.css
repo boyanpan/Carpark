@@ -121,3 +121,30 @@ html, body { height: 100vh; width: 100vw; margin: 0; padding: 0; }
     50% { transform: scale(1.05); box-shadow: 0 0 0 8px rgba(244, 63, 94, 0); }
     100% { transform: scale(1); }
 }
+
+/* 🚗 [特色 3] 愛車專用專屬地圖標記與跳動特效 */
+.parked-marker-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 40px;
+    height: 40px;
+    animation: parkedBounce 1s infinite alternate ease-in-out;
+}
+.parked-marker-bubble {
+    background-color: #7c664e !important;
+    color: #fdfbf7 !important;
+    border: 2px solid #fffdfb !important;
+    border-radius: 50% !important;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    box-shadow: 0 4px 10px rgba(43,34,27,0.3) !important;
+}
+@keyframes parkedBounce {
+    0% { transform: translateY(0); }
+    100% { transform: translateY(-6px); }
+}

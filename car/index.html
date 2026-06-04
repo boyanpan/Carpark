@@ -70,6 +70,24 @@
                             <option value="price">💰 推薦：價格最便宜</option>
                         </select>
                     </div>
+                    <div class="mt-2" id="parking-helper-zone">
+                        <button id="parkedBtn" onclick="toggleParkedStatus()" class="w-full py-2 bg-[#7c664e] hover:bg-[#63513e] text-[#fdfbf7] rounded-xl text-xs font-bold shadow-sm transition active:scale-95 flex items-center justify-center gap-1">
+                            🚗 我停好了！紀錄愛車位置
+                        </button>
+                    </div>
+                    <div id="parkedTimerPanel" class="mt-2 bg-[#fffdf6] border-2 border-dashed border-[#c5b49e] p-3 rounded-xl hidden flex-col gap-2 shadow-sm text-xs transition-all">
+                        <div class="flex justify-between items-center">
+                            <span class="font-black text-stone-700 flex items-center gap-1">⏰ 愛車計時手帳</span>
+                            <button onclick="clearParkedStatus()" class="text-red-500 font-bold text-[11px] hover:underline bg-red-50 px-2 py-0.5 rounded-md border border-red-200">清除紀錄</button>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 bg-[#fbf9f6] p-2 rounded-lg border border-[#e6dfd5]">
+                            <div class="text-stone-600 font-medium">⏱️ 停放時間：<br><span id="parkedTimeDisplay" class="font-bold text-stone-800 font-mono text-sm">0 分鐘</span></div>
+                            <div class="text-stone-600 font-medium">💰 預估費用：<br><span id="parkedCostDisplay" class="font-bold text-[#b45309] font-mono text-sm">$0 元</span></div>
+                        </div>
+                        <button id="navToCarBtn" onclick="navToMyCar()" class="w-full bg-[#1b2a47] hover:bg-[#2c3e60] text-white py-2 rounded-xl font-black text-xs shadow-sm flex items-center justify-center gap-1 transition active:scale-95">
+                            🧭 導航回愛車位置
+                        </button>
+                    </div>
                 </div>
             </div>
 

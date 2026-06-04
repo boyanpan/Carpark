@@ -499,20 +499,25 @@ function renderMapMarkers(data) {
             <div class="p-3.5 min-w-[240px] bg-[#fffdfb]">
                 <div class="flex justify-between items-start mb-1 pr-4">
                     <h3 class="font-black text-base text-[#1b2a47] leading-tight font-serif">${item.name}</h3>
-                </div>
-                <span class="inline-block text-[9px] bg-[#f4ece1] text-[#7c664e] px-1.5 py-0.5 rounded-md font-bold mb-2 border border-[#dcd1c0]/40">${item.category}</span>
-                <p class="text-[10px] text-stone-500 mb-2 flex items-center gap-1 font-medium">📍 ${item.address}</p>
-                <div class="bg-[#fbf9f6] rounded-xl px-2.5 border border-[#e6dfd5] mb-2 shadow-inner">
-                    ${buildRow('🚗', '汽車', item.car)}
-                </div>
-                <div class="bg-[#fffbeb] text-[#b45309] text-[10px] font-bold p-2.5 rounded-xl border border-[#fef3c7] mb-2 text-center shadow-sm">🤖 ${item.prediction}</div>
-                ${buildSmartTransitBadge(item)}
-                <div class="text-stone-700 text-[10px] bg-[#fbf9f6] p-2.5 rounded-xl border border-[#e6dfd5] leading-relaxed whitespace-pre-line shadow-sm max-h-[120px] overflow-y-auto no-scrollbar mt-2 mb-3">💰 ${item.payex}</div>
-                <button onclick="startNav('${safeItemStr}')" class="w-full bg-[#1b2a47] hover:bg-[#2c3e60] text-[#fdfbf7] py-2.5 rounded-xl text-xs font-black shadow-md active:scale-95 transition flex items-center justify-center gap-1.5">
-                    🧭 開始導航
-                </button>
-            </div>
-        `);
+        </div>
+        <span class="inline-block text-[9px] bg-[#f4ece1] text-[#7c664e] px-1.5 py-0.5 rounded-md font-bold mb-2 border border-[#dcd1c0]/40">${item.category}</span>
+        <p class="text-[10px] text-stone-500 mb-2 flex items-center gap-1 font-medium">📍 ${item.address}</p>
+        <div class="bg-[#fbf9f6] rounded-xl px-2.5 border border-[#e6dfd5] mb-2 shadow-inner">
+            ${buildRow('🚗', '汽車', item.car)}
+        </div>
+        <div class="bg-[#fffbeb] text-[#b45309] text-[10px] font-bold p-2.5 rounded-xl border border-[#fef3c7] mb-2 text-center shadow-sm">🤖 ${item.prediction}</div>
+        ${buildSmartTransitBadge(item)}
+        <div class="text-stone-700 text-[10px] bg-[#fbf9f6] p-2.5 rounded-xl border border-[#e6dfd5] leading-relaxed whitespace-pre-line shadow-sm max-h-[120px] overflow-y-auto no-scrollbar mt-2 mb-3">💰 ${item.payex}</div>
+        
+        <a href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${item.lat},${item.lng}" target="_blank" class="w-full mb-1.5 bg-[#0d9488] hover:bg-[#115e59] text-[#fdfbf7] py-2 rounded-xl text-xs font-black shadow-md active:scale-95 transition flex items-center justify-center gap-1.5 no-underline text-center">
+            🗺️ 查看入口街景 ↗
+        </a>
+        
+        <button onclick="startNav('${safeItemStr}')" class="w-full bg-[#1b2a47] hover:bg-[#2c3e60] text-[#fdfbf7] py-2.5 rounded-xl text-xs font-black shadow-md active:scale-95 transition flex items-center justify-center gap-1.5">
+            🧭 開始導航
+        </button>
+    </div>
+`);
         marker.on('click', () => { highlightCardInList(item.id); });
         window.markersMap[item.id] = marker;
         markers.push(marker);
@@ -567,6 +572,17 @@ function renderList(data, isUsingDest) {
                             <span class="text-sm leading-none">🧭</span> 導航
                         </button>
                     </div>
+                    <div class="flex flex-col items-center justify-between shrink-0 border-l border-[#e6dfd5]/60 pl-3 ml-1">
+                        <button onclick="toggleFav('${item.id}')" class="text-xl active:scale-75 transition pt-1" title="加入/移除收藏">${isFav ? '🩷' : '🤍'}</button>
+    
+                        <a href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${item.lat},${item.lng}" target="_blank" class="bg-[#0d9488] hover:bg-[#115e59] text-[#fdfbf7] px-2 py-1.5 rounded-xl text-[10px] font-black shadow-md active:scale-95 transition flex items-center gap-1 mt-2 text-center no-underline" title="入口街景">
+                        🗺️ 街景
+                        </a>
+    
+                    <button onclick="startNav('${safeItemStr}')" class="bg-[#1b2a47] hover:bg-[#2c3e60] text-[#fdfbf7] px-3 py-2 rounded-xl text-[11px] font-black shadow-md active:scale-95 transition flex flex-col items-center gap-1 mt-2">
+                        <span class="text-sm leading-none">🧭</span> 導航
+    </button>
+</div>
                 </div>
             </div>`;
     });
@@ -991,6 +1007,134 @@ function executeVoiceSearch(keyword) {
         searchLocation();        // 2. 觸發核心搜尋主程式，自動走「本地比對」或「Google圖資穿透」流程！
     }
 }
+ // ==========================================
+// 🚗 [特色 3] 我停好了！尋車與計時防收費小幫手邏輯
+// ==========================================
+let parkedMarker = null;
+let parkedInterval = null;
+
+window.toggleParkedStatus = function() {
+    // 優先使用使用者目前經緯度，若定位尚未載入則抓目前地圖畫面中心點
+    const targetPos = userLocation || [map.getCenter().lat, map.getCenter().lng];
+    if (!targetPos) {
+        alert("目前無法取得定位，請稍後再試！");
+        return;
+    }
+
+    // 提示車主輸入費率（貼心的防呆預設 $40/hr）
+    const rateInput = prompt("請輸入此停車場的每小時費率（純數字，例如: 40，不計費請填0）：", "40");
+    const hourlyRate = parseInt(rateInput, 10) || 0;
+
+    localStorage.setItem('p_parked_lat', targetPos[0]);
+    localStorage.setItem('p_parked_lng', targetPos[1]);
+    localStorage.setItem('p_parked_time', Date.now());
+    localStorage.setItem('p_parked_rate', hourlyRate);
+
+    startParkedTimerLoop();
+    alert("🚗 愛車位置已順利紀錄！已為您啟動防收費計時手帳。");
+};
+
+function startParkedTimerLoop() {
+    const lat = localStorage.getItem('p_parked_lat');
+    const lng = localStorage.getItem('p_parked_lng');
+    const startTime = localStorage.getItem('p_parked_time');
+    const hourlyRate = parseInt(localStorage.getItem('p_parked_rate'), 10) || 0;
+
+    if (!lat || !lng || !startTime) return;
+
+    // UI 切換展示
+    document.getElementById('parking-helper-zone').classList.add('hidden');
+    const panel = document.getElementById('parkedTimerPanel');
+    panel.classList.remove('hidden');
+    panel.classList.add('flex');
+
+    // 建立地圖上的專屬愛車圖示
+    if (parkedMarker) map.removeLayer(parkedMarker);
+    
+    const parkedIcon = L.divIcon({
+        className: 'custom-div-icon',
+        html: `<div class="parked-marker-container"><div class="parked-marker-bubble">🚗</div></div>`,
+        iconSize: [40, 40],
+        iconAnchor: [20, 20]
+    });
+    
+    parkedMarker = L.marker([parseFloat(lat), parseFloat(lng)], { icon: parkedIcon }).addTo(map);
+    parkedMarker.bindPopup(`
+        <div class="p-2 text-center text-xs font-serif font-bold bg-[#fffdfb]">
+            🔑 我的愛車停在這裡！<br>
+            <span class="text-[10px] text-stone-500 font-sans font-medium">記錄時間: ${new Date(parseInt(startTime)).toLocaleTimeString()}</span>
+        </div>
+    `);
+
+    // 動態計算費用與時間計時器
+    const updateDisplay = () => {
+        const now = Date.now();
+        const diffMs = now - parseInt(startTime);
+        const diffMins = Math.max(1, Math.floor(diffMs / 1000 / 60)); // 最少顯示1分鐘
+        
+        let timeStr = `${diffMins} 分鐘`;
+        if (diffMins >= 60) {
+            const hrs = Math.floor(diffMins / 60);
+            const mins = diffMins % 60;
+            timeStr = `${hrs} 小時 ${mins} 分`;
+        }
+        
+        // 計費模型：不滿1小時以1小時計（常見的公有/民營標準）
+        const hoursBilled = Math.ceil(diffMins / 60);
+        const totalCost = hoursBilled * hourlyRate;
+
+        document.getElementById('parkedTimeDisplay').innerText = timeStr;
+        document.getElementById('parkedCostDisplay').innerText = `$${totalCost} 元`;
+    };
+
+    updateDisplay();
+    if (parkedInterval) clearInterval(parkedInterval);
+    parkedInterval = setInterval(updateDisplay, 30000); // 每 30 秒自動精準重算
+}
+
+window.clearParkedStatus = function() {
+    if (!confirm("確定要結算並清除這次的停車紀錄手帳嗎？")) return;
+    
+    if (parkedInterval) clearInterval(parkedInterval);
+    if (parkedMarker) map.removeLayer(parkedMarker);
+    parkedMarker = null;
+
+    localStorage.removeItem('p_parked_lat');
+    localStorage.removeItem('p_parked_lng');
+    localStorage.removeItem('p_parked_time');
+    localStorage.removeItem('p_parked_rate');
+
+    document.getElementById('parking-helper-zone').classList.remove('hidden');
+    const panel = document.getElementById('parkedTimerPanel');
+    panel.classList.remove('flex');
+    panel.classList.add('hidden');
+};
+
+window.navToMyCar = function() {
+    const lat = localStorage.getItem('p_parked_lat');
+    const lng = localStorage.getItem('p_parked_lng');
+    if (!lat || !lng) return;
+
+    // 虛擬包裝出一個與原本 startNav 相容的愛車目的地物件
+    const fakeCarItem = {
+        name: "我的愛車 🚗",
+        lat: parseFloat(lat),
+        lng: parseFloat(lng)
+    };
+    
+    const safeItemStr = encodeURIComponent(JSON.stringify(fakeCarItem));
+    startNav(safeItemStr); // 完美直接無縫調用您現有的導航連動引擎
+};
+
+// 讓網頁重整時，自動檢查上一次停在 localStorage 的車子是否還在計時
+function checkSavedParkedStatus() {
+    if (localStorage.getItem('p_parked_lat')) {
+        startParkedTimerLoop();
+    }
+}
+
+// 載入時自動呼叫檢查
+setTimeout(checkSavedParkedStatus, 1000);
 
 // 系統初始化啟動
 initCompass();
