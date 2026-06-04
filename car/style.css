@@ -108,3 +108,16 @@ html, body { height: 100vh; width: 100vw; margin: 0; padding: 0; }
     background-color: #fffdfb !important;
     border: 2px solid #1b2a47 !important;
 }
+
+/* 🎙️ 語音助理正在聆聽的微可愛呼吸特效 */
+.listening-active {
+    background-color: #fecdd3 !important; /* 溫柔草莓粉紅 */
+    border-color: #fda4af !important;
+    animation: voicePulse 1.2s infinite ease-in-out;
+}
+
+@keyframes voicePulse {
+    0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.4); }
+    50% { transform: scale(1.05); box-shadow: 0 0 0 8px rgba(244, 63, 94, 0); }
+    100% { transform: scale(1); }
+}

@@ -854,6 +854,127 @@ function buildSmartTransitBadge(item) {
     `;
 }
 
+
+// ==========================================
+// 🎙️ 智能語音操作系統 (Web Speech API)
+// ==========================================
+let voiceRecognition;
+let isVoiceListening = false;
+
+function initVoiceControl() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+        console.log("此瀏覽器環境不支援 Web Speech API");
+        return;
+    }
+    
+    voiceRecognition = new SpeechRecognition();
+    voiceRecognition.continuous = false; // 辨識完單句後自動結束
+    voiceRecognition.lang = 'zh-TW';     // 設定辨識語系為台灣中文
+    voiceRecognition.interimResults = false; // 不顯示過渡文字
+
+    // 當開始錄音時
+    voiceRecognition.onstart = () => {
+        isVoiceListening = true;
+        const btn = document.getElementById('voiceBtn');
+        if (btn) {
+            btn.innerHTML = "🔴"; // 變成錄音紅點
+            btn.classList.add('listening-active');
+        }
+    };
+
+    // 當錄音結束時（不論成功或失敗）
+    voiceRecognition.onend = () => {
+        isVoiceListening = false;
+        const btn = document.getElementById('voiceBtn');
+        if (btn) {
+            btn.innerHTML = "🎙️"; // 變回麥克風
+            btn.classList.remove('listening-active');
+        }
+    };
+
+    // 收到辨識結果，進行語音指令拆解與橋接
+    voiceRecognition.onresult = (event) => {
+        let resultText = event.results[0][0].transcript.trim();
+        // 移除常見的句尾標點符號
+        resultText = resultText.replace(/[。？，！]/g, "");
+        
+        if (!resultText) return;
+        handleVoiceCommand(resultText);
+    };
+}
+
+// 切換語音開關
+window.toggleVoiceControl = function() {
+    if (!voiceRecognition) initVoiceControl();
+    
+    if (!voiceRecognition) {
+        alert("哎呀，您的瀏覽器不支援語音功能（推薦在手機 Safari 或桌面版 Chrome 上操作喔！）");
+        return;
+    }
+
+    if (isVoiceListening) {
+        voiceRecognition.stop();
+    } else {
+        voiceRecognition.start();
+    }
+};
+
+// 🧠 核心語音決策樹：完美的將聲音橋接到原本的功能
+function handleVoiceCommand(cmd) {
+    console.log("【語音小助手聽到】: ", cmd);
+
+    // 1. 指令：重新定位 / 清除
+    if (cmd.includes("重新定位") || cmd.includes("定位") || cmd.includes("清除")) {
+        if (typeof clearSearchAndLocate === "function") clearSearchAndLocate();
+        return;
+    }
+    
+    // 2. 指令：看我的收藏
+    if (cmd.includes("我的收藏") || cmd.includes("收藏")) {
+        if (typeof switchTab === "function") switchTab('fav');
+        return;
+    }
+    
+    // 3. 指令：看附近推薦
+    if (cmd.includes("附近推薦") || cmd.includes("附近") || cmd.includes("推薦")) {
+        if (typeof switchTab === "function") switchTab('search');
+        return;
+    }
+    
+    // 4. 指令：結束導航
+    if (cmd.includes("結束導航") || cmd.includes("停止導航") || cmd.includes("關閉導航")) {
+        if (typeof stopNavigation === "function") stopNavigation();
+        return;
+    }
+
+    // 5. 指令：搜尋特定地點 (例：「搜尋 台北101」 或 「找 國父紀念館」)
+    if (cmd.includes("搜尋") || cmd.includes("找")) {
+        let cleanKeyword = cmd.replace(/搜尋|找/g, "").trim();
+        if (cleanKeyword) {
+            executeVoiceSearch(cleanKeyword);
+        }
+        return;
+    }
+
+    // 6. 預設兜底：如果直接講地名（例：「西門町」），也直接幫他搜尋
+    executeVoiceSearch(cmd);
+}
+
+// 輔助函式：幫忙把字塞進搜尋框並點擊搜尋
+function executeVoiceSearch(keyword) {
+    const inputEl = document.getElementById('searchInput');
+    if (inputEl && typeof searchLocation === "function") {
+        inputEl.value = keyword;
+        searchLocation();
+    }
+}
+
+// 確保頁面載入完畢後先靜態配置好語音控制
+document.addEventListener('DOMContentLoaded', () => {
+    initVoiceControl();
+});
+
 // 系統初始化啟動
 initCompass();
 initGPS();
