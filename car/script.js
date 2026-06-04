@@ -856,124 +856,141 @@ function buildSmartTransitBadge(item) {
 
 
 // ==========================================
-// 🎙️ 智能語音操作系統 (Web Speech API)
+// 🎙️ 全自動免持語音控制系統 (Continuous Web Speech API)
 // ==========================================
 let voiceRecognition;
-let isVoiceListening = false;
+let isVoiceActive = false; // 控制免持全自動模式的總開關
 
 function initVoiceControl() {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const SpeechRecognition = window.ShareSpeechRecognition || window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-        console.log("此瀏覽器環境不支援 Web Speech API");
+        console.warn("此瀏覽器環境不支援 Web Speech API");
         return;
     }
     
     voiceRecognition = new SpeechRecognition();
-    voiceRecognition.continuous = false; // 辨識完單句後自動結束
-    voiceRecognition.lang = 'zh-TW';     // 設定辨識語系為台灣中文
-    voiceRecognition.interimResults = false; // 不顯示過渡文字
+    voiceRecognition.continuous = true;       // 🔥 關鍵核心：開啟連續辨識，說完話不會自動結束
+    voiceRecognition.interimResults = false;   // 只接收最終確認的字串，避免中途短句干擾
+    voiceRecognition.lang = 'zh-TW';           // 設定語系為台灣中文
 
-    // 當開始錄音時
+    // 語音助理啟動時：按鈕變成高亮閃爍的「錄音中紅點 🛑」
     voiceRecognition.onstart = () => {
-        isVoiceListening = true;
         const btn = document.getElementById('voiceBtn');
         if (btn) {
-            btn.innerHTML = "🔴"; // 變成錄音紅點
-            btn.classList.add('listening-active');
+            btn.innerHTML = "🛑";
+            btn.className = "bg-red-500 text-white border-red-600 w-10 rounded-lg shadow-sm animate-pulse text-lg flex items-center justify-center shrink-0 transition";
         }
     };
 
-    // 當錄音結束時（不論成功或失敗）
+    // 當語音因為短暫靜音、環境噪音或瀏覽器秒數限制而斷線時的處理
     voiceRecognition.onend = () => {
-        isVoiceListening = false;
-        const btn = document.getElementById('voiceBtn');
-        if (btn) {
-            btn.innerHTML = "🎙️"; // 變回麥克風
-            btn.classList.remove('listening-active');
+        // ✨ 密技：如果使用者沒有手動關閉開關，代表是瀏覽器自動斷線，我們立即啟動「無縫無感重連」！
+        if (isVoiceActive) {
+            setTimeout(() => {
+                if (isVoiceActive) {
+                    try {
+                        voiceRecognition.start();
+                    } catch (e) {
+                        console.log("語音助手無縫重連監聽中...", e);
+                    }
+                }
+            }, 300);
+        } else {
+            // 真正關閉狀態，回復成原本微調的灰白麥克風外觀
+            const btn = document.getElementById('voiceBtn');
+            if (btn) {
+                btn.innerHTML = "🎙️";
+                btn.className = "bg-white border border-slate-200 w-10 rounded-lg shadow-sm active:bg-slate-50 text-lg flex items-center justify-center shrink-0 transition";
+            }
         }
     };
 
-    // 收到辨識結果，進行語音指令拆解與橋接
+    // 接收即時語音辨識定案結果
     voiceRecognition.onresult = (event) => {
-        let resultText = event.results[0][0].transcript.trim();
-        // 移除常見的句尾標點符號
-        resultText = resultText.replace(/[。？，！]/g, "");
+        // 只拿最新產生、確認定案的那一句話 (resultIndex)
+        const currentResultIndex = event.resultIndex;
+        const isFinal = event.results[currentResultIndex].isFinal;
         
-        if (!resultText) return;
-        handleVoiceCommand(resultText);
+        if (isFinal) {
+            let resultText = event.results[currentResultIndex][0].transcript.trim();
+            resultText = resultText.replace(/[。？，！]/g, ""); // 清除結尾標點符號
+            
+            if (resultText) {
+                handleVoiceCommand(resultText);
+            }
+        }
+    };
+
+    // 權限或硬體錯誤處理
+    voiceRecognition.onerror = (event) => {
+        console.error("語音監聽異常:", event.error);
+        if (event.error === 'not-allowed') {
+            alert("請允許網頁存取您的麥克風權限，才能開啟免持語音操作功能喔！");
+            isVoiceActive = false;
+        }
     };
 }
 
-// 切換語音開關
-window.toggleVoiceControl = function() {
+// 免持模式切換開關 (點擊一次，終身監聽；再點擊一次即可完全關閉)
+window.toggleContinuousVoice = function() {
     if (!voiceRecognition) initVoiceControl();
     
     if (!voiceRecognition) {
-        alert("哎呀，您的瀏覽器不支援語音功能（推薦在手機 Safari 或桌面版 Chrome 上操作喔！）");
+        alert("此瀏覽器不支援語音辨識（建議使用桌面版 Chrome 或 iOS Safari 行動版）");
         return;
     }
 
-    if (isVoiceListening) {
-        voiceRecognition.stop();
+    if (isVoiceActive) {
+        isVoiceActive = false;
+        voiceRecognition.stop(); // 關閉語音
     } else {
-        voiceRecognition.start();
+        isVoiceActive = true;
+        voiceRecognition.start(); // 啟動監聽
     }
 };
 
-// 🧠 核心語音決策樹：完美的將聲音橋接到原本的功能
+// 🧠 核心語音決策：完美將語音字詞對接到打字搜尋
 function handleVoiceCommand(cmd) {
-    console.log("【語音小助手聽到】: ", cmd);
+    console.log("【免持助理聽到語音】: ", cmd);
 
-    // 1. 指令：重新定位 / 清除
-    if (cmd.includes("重新定位") || cmd.includes("定位") || cmd.includes("清除")) {
+    // 1. 系統控制功能優先判斷
+    if (cmd.includes("重新定位") || cmd.includes("清除搜尋") || cmd.includes("定位")) {
         if (typeof clearSearchAndLocate === "function") clearSearchAndLocate();
         return;
     }
-    
-    // 2. 指令：看我的收藏
     if (cmd.includes("我的收藏") || cmd.includes("收藏")) {
         if (typeof switchTab === "function") switchTab('fav');
         return;
     }
-    
-    // 3. 指令：看附近推薦
-    if (cmd.includes("附近推薦") || cmd.includes("附近") || cmd.includes("推薦")) {
+    if (cmd.includes("附近推薦") || cmd.includes("推薦") || cmd.includes("附近")) {
         if (typeof switchTab === "function") switchTab('search');
         return;
     }
-    
-    // 4. 指令：結束導航
     if (cmd.includes("結束導航") || cmd.includes("停止導航") || cmd.includes("關閉導航")) {
         if (typeof stopNavigation === "function") stopNavigation();
         return;
     }
 
-    // 5. 指令：搜尋特定地點 (例：「搜尋 台北101」 或 「找 國父紀念館」)
-    if (cmd.includes("搜尋") || cmd.includes("找")) {
-        let cleanKeyword = cmd.replace(/搜尋|找/g, "").trim();
-        if (cleanKeyword) {
-            executeVoiceSearch(cleanKeyword);
-        }
-        return;
+    // 2. 搜尋字詞優化處理：如果說「搜尋 台北車站」或「我要找 101」，自動把開頭冗詞過濾掉
+    let searchKeyword = cmd;
+    if (cmd.startsWith("搜尋") || cmd.startsWith("尋找") || cmd.startsWith("我要找") || cmd.startsWith("幫我找")) {
+        searchKeyword = cmd.replace(/^(搜尋|尋找|我要找|幫我找)/, "").trim();
     }
-
-    // 6. 預設兜底：如果直接講地名（例：「西門町」），也直接幫他搜尋
-    executeVoiceSearch(cmd);
+    
+    // 3. 執行與打字完全 100% 相同的搜尋流程
+    if (searchKeyword) {
+        executeVoiceSearch(searchKeyword);
+    }
 }
 
-// 輔助函式：幫忙把字塞進搜尋框並點擊搜尋
+// 實作與打字完全一模一樣的搜尋流程
 function executeVoiceSearch(keyword) {
     const inputEl = document.getElementById('searchInput');
     if (inputEl && typeof searchLocation === "function") {
-        inputEl.value = keyword;
-        searchLocation();
+        inputEl.value = keyword; // 1. 精準填入打字搜尋框（使用者能在畫面上看到字）
+        searchLocation();        // 2. 觸發核心搜尋主程式，自動走「本地比對」或「Google圖資穿透」流程！
     }
 }
-
-// 確保頁面載入完畢後先靜態配置好語音控制
-document.addEventListener('DOMContentLoaded', () => {
-    initVoiceControl();
-});
 
 // 系統初始化啟動
 initCompass();
