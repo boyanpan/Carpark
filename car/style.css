@@ -1,10 +1,11 @@
-/* 全域與重置 */
+/* 全域重置與 iOS 平滑化 */
 html, body { 
     height: 100vh; 
     width: 100vw; 
     margin: 0; 
     padding: 0; 
     background-color: #f8fafc;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 .no-scrollbar::-webkit-scrollbar { 
@@ -15,133 +16,94 @@ html, body {
     display: none !important; 
 }
 
-/* 🚀 GPU 硬體加速專用類別：大幅降低 CPU 重繪率，解決崩潰核心問題 */
+/* 🚀 核心優化：硬體加速隔離層，避免重繪地圖時卡頓 */
 .layer-accelerated {
     will-change: transform;
     backface-visibility: hidden;
     transform: translateZ(0);
 }
 
-/* 導航提示框動態觸發 */
 #nav-header.active { 
     transform: translateY(0) translateZ(0); 
 }
 
-/* Leaflet 彈窗美化 */
+/* Apple Maps 風格：精緻白淨的 Leaflet 彈窗 */
 .leaflet-popup-content-wrapper { 
-    border-radius: 16px; 
+    border-radius: 20px; 
     padding: 0; 
-    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12); 
-    border: 1px solid rgba(226, 232, 240, 0.8); 
+    box-shadow: 0 15px 40px rgba(15, 23, 42, 0.1); 
+    border: 1px solid rgba(241, 245, 249, 0.9); 
+    background: #ffffff;
 }
 .leaflet-popup-content { 
     margin: 0; 
     width: auto !important; 
 }
 .leaflet-popup-close-button { 
-    top: 12px !important; 
-    right: 12px !important; 
+    top: 14px !important; 
+    right: 14px !important; 
     color: #94a3b8 !important; 
     font-size: 16px !important;
 }
+.leaflet-popup-tip {
+    background: #ffffff;
+    box-shadow: 0 5px 10px rgba(0,0,0,0.05);
+}
 
-/* 🚘 定位車輛圖示特效（改用高效 Transform 動畫，防止卡頓） */
+/* 🚘 汽車定位點特效 (純 Transform 縮放動畫，不傷 CPU) */
 .car-marker-container { 
     width: 44px; 
     height: 44px; 
     display: flex; 
     align-items: center; 
     justify-content: center; 
-    transition: transform 0.4s cubic-bezier(0.25, 1, 0.5, 1); 
 }
 .car-marker { 
-    font-size: 32px; 
-    filter: drop-shadow(0px 4px 6px rgba(15, 23, 42, 0.25)); 
+    font-size: 30px; 
+    filter: drop-shadow(0px 4px 8px rgba(15,23,42,0.15)); 
     line-height: 1; 
 }
 .car-marker-container::after { 
     content: ''; 
     position: absolute; 
-    width: 36px; 
-    height: 36px; 
-    background: rgba(37, 99, 235, 0.25); 
+    width: 32px; 
+    height: 32px; 
+    background: rgba(37, 99, 235, 0.15); 
     border-radius: 50%; 
     z-index: -1; 
-    animation: gpu-pulse 2.2s cubic-bezier(0.16, 1, 0.3, 1) infinite; 
+    animation: apple-pulse 2s cubic-bezier(0.16, 1, 0.3, 1) infinite; 
 }
 
-@keyframes gpu-pulse { 
-    0% { transform: scale(0.75); opacity: 1; } 
-    100% { transform: scale(2.1); opacity: 0; } 
+@keyframes apple-pulse { 
+    0% { transform: scale(0.8); opacity: 1; } 
+    100% { transform: scale(2.2); opacity: 0; } 
 }
 
-/* 📌 目的地大頭針掉落與跳動特效 */
+/* 📌 目的地大頭針掉落與呼吸動畫 */
 .dest-marker-container { 
     display: flex; 
     align-items: center; 
     justify-content: center; 
     width: 42px; 
     height: 42px; 
-    animation: gpu-bounce 0.6s infinite alternate cubic-bezier(0.25, 1, 0.5, 1); 
+    animation: apple-bounce 0.5s infinite alternate cubic-bezier(0.25, 1, 0.5, 1); 
 }
 .dest-marker { 
-    font-size: 38px; 
-    filter: drop-shadow(0px 6px 8px rgba(15, 23, 42, 0.3)); 
+    font-size: 36px; 
+    filter: drop-shadow(0px 8px 12px rgba(15,23,42,0.2)); 
     line-height: 1; 
 }
 
-@keyframes gpu-bounce { 
+@keyframes apple-bounce { 
     0% { transform: translateY(0); } 
-    100% { transform: translateY(-12px); } 
+    100% { transform: translateY(-8px); } 
 }
 
-/* 列表推薦標籤 */
-.recommend-badge { 
-    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); 
-    color: white; 
-    padding: 3px 8px; 
-    border-radius: 6px;
-    font-size: 10px; 
-    font-weight: 900; 
-    letter-spacing: 0.5px; 
-    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2);
-}
-
-/* 雙向連動高亮卡片樣式 */
+/* 列表高亮選中卡片樣式 */
 .top-card { 
-    border: 2px solid #2563eb !important; 
-    background-color: #f0f5ff !important; 
-    box-shadow: 0 6px 20px rgba(37, 99, 235, 0.1) !important;
-    transform: translateY(-2px);
-}
-
-/* 星星收藏樣式 */
-.fav-star { 
-    cursor: pointer; 
-    transition: transform 0.2s ease, color 0.2s ease; 
-}
-.fav-star:active {
-    transform: scale(1.3);
-}
-.fav-star.active { 
-    color: #eab308; 
-}
-.fav-star.inactive { 
-    color: #cbd5e1; 
-}
-
-/* 🌟 地圖常駐店名標籤樣式 */
-.custom-map-label {
-    background-color: #ffffff !important;
-    color: #10b981 !important;
-    border: 2px solid #10b981 !important;
-    border-radius: 20px !important;
-    padding: 4px 12px !important;
-    font-size: 12px !important;
-    font-weight: 800 !important;
-    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12) !important;
-    white-space: nowrap !important;
-    transition: all 0.2s ease;
+    border: 2px solid #3b82f6 !important; 
+    background-color: #f8fafc !important; 
+    box-shadow: 0 8px 24px rgba(59, 130, 246, 0.06) !important;
 }
 
 /* 搜尋結果落下動畫 */
@@ -154,11 +116,24 @@ html, body {
     animation: dropDown 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; 
 }
 .target-marker { 
-    font-size: 36px;
-    filter: drop-shadow(0 4px 6px rgba(0,0,0,0.2));
+    font-size: 34px;
+    filter: drop-shadow(0 4px 8px rgba(0,0,0,0.12));
 }
 
 @keyframes dropDown {
-    0% { transform: translateY(-100px); opacity: 0; }
+    0% { transform: translateY(-80px); opacity: 0; }
     100% { transform: translateY(0); opacity: 1; }
+}
+
+/* Leaflet 常駐店名標籤 */
+.custom-map-label {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 12px !important;
+    padding: 4px 10px !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.05) !important;
+    white-space: nowrap !important;
 }
