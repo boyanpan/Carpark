@@ -33,7 +33,7 @@
 
     <div id="ui-container" class="absolute top-0 left-0 w-full h-full pointer-events-none flex flex-col md:flex-row z-[2000] overflow-hidden">
         
-        <div id="sidebar-wrapper" class="w-full md:w-[400px] h-full flex flex-col justify-between md:justify-start shrink-0 md:bg-white md:shadow-[4px_0_24px_rgba(0,0,0,0.1)] relative overflow-hidden">
+        <div id="sidebar-wrapper" class="w-full md:w-[400px] h-full flex flex-col shrink-0 md:bg-white md:shadow-[4px_0_24px_rgba(0,0,0,0.1)] relative overflow-hidden">
             
             <div id="search-panel" class="pointer-events-auto bg-white p-3 shadow-sm md:shadow-none rounded-b-2xl md:rounded-none z-50 transition-transform duration-300 ease-in-out shrink-0">
                 <div class="flex justify-between items-center mb-3">
@@ -46,30 +46,35 @@
                 <div class="flex flex-col gap-2">
                     <div class="flex gap-1.5 relative">
                         <div class="relative flex-1">
-                            <input type="text" id="searchInput" autocomplete="off" onkeydown="if(event.key === 'Enter') searchLocation()" placeholder="搜尋停車場、超商或地點..." class="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-400 focus:bg-blue-50 transition">
-                            <div id="autocomplete-list" class="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl hidden max-h-[40vh] overflow-y-auto z-[5000]"></div>
+                            <input type="text" id="searchInput" autocomplete="off" onkeydown="if(event.key === 'Enter') searchLocation()" placeholder="搜尋停車場、超商或地點..." 
+                                   class="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-400 focus:bg-blue-50 transition">
+                            <div id="autocomplete-list" class="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl hidden max-h-[40vh] overflow-y-auto z-[5000]">
+                            </div>
                         </div>
-                        <button onclick="searchLocation()" class="bg-blue-600 text-white px-4 rounded-lg shadow-sm active:bg-blue-800 text-sm font-bold shrink-0 transition">搜尋</button>
-                        <button onclick="clearSearchAndLocate()" class="bg-slate-100 hover:bg-slate-200 text-slate-600 px-2.5 rounded-lg border active:scale-95 transition shrink-0 text-sm">📍</button>
+                        <button onclick="searchLocation()" class="bg-blue-600 text-white px-4 rounded-lg shadow-sm active:bg-blue-800 text-sm font-bold transition shrink-0">搜尋</button>
+                        <button onclick="clearSearchAndLocate()" class="bg-white border border-slate-200 w-10 rounded-lg shadow-sm active:bg-slate-50 text-lg flex items-center justify-center shrink-0">📍</button>
                     </div>
-                    
+
                     <div class="flex gap-2">
-                        <select id="radiusSelect" onchange="handleFilter()" class="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 outline-none focus:border-blue-400 transition">
-                            <option value="500">附近 500m</option>
-                            <option value="1000">附近 1km</option>
-                            <option value="2000" selected>附近 2km</option>
-                            <option value="5000">附近 5km</option>
-                            <option value="99999">全部範圍</option>
+                        <select id="radiusSelect" onchange="handleFilter()" class="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none font-bold text-slate-600 focus:border-blue-400 cursor-pointer shadow-sm">
+                            <option value="500">📍 500 公尺內</option>
+                            <option value="1000" selected>📍 1 公里內</option>
+                            <option value="2000">📍 2 公里內</option>
+                            <option value="5000">📍 5 公里內</option>
+                            <option value="99999">📍 顯示全部</option>
                         </select>
-                        <select id="sortSelect" onchange="changeSortMode()" class="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 outline-none focus:border-blue-400 transition">
-                            <option value="distance">依距離排序</option>
-                            <option value="price">依價格排序</option>
+                        
+                        <select id="sortSelect" onchange="changeSortMode()" class="flex-1 p-2 bg-blue-50 border border-blue-200 rounded-lg text-sm outline-none font-black text-blue-700 focus:border-blue-400 cursor-pointer shadow-sm">
+                            <option value="distance" selected>✨ 推薦：距離最近</option>
+                            <option value="price">💰 推薦：價格最便宜</option>
                         </select>
                     </div>
                 </div>
             </div>
 
-            <div id="bottom-sheet" class="pointer-events-auto bg-white rounded-t-3xl md:rounded-none shadow-[0_-8px_30px_rgba(0,0,0,0.08)] md:shadow-none flex flex-col z-40 transition-transform duration-300 ease-in-out relative md:flex-1 overflow-hidden h-[35vh] md:h-auto">
+            <div class="flex-1 pointer-events-none md:hidden"></div>
+
+            <div id="bottom-sheet" class="pointer-events-auto bg-white rounded-t-3xl md:rounded-none shadow-[0_-10px_30px_rgba(0,0,0,0.1)] md:shadow-none flex flex-col z-30 transition-transform duration-300 ease-in-out relative md:flex-1 overflow-hidden md:h-0 md:min-h-0">
                 <div id="drag-handle" class="w-full h-8 flex justify-center items-center md:hidden cursor-pointer shrink-0" onclick="toggleBottomSheet()">
                     <svg id="sheet-arrow" class="w-7 h-7 text-slate-400 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 15l7-7 7 7"></path>
@@ -82,14 +87,14 @@
                 </div>
 
                 <div id="content-list" class="flex-1 overflow-y-auto p-3 space-y-2.5 bg-slate-50/50 md:bg-white no-scrollbar pb-10 overscroll-contain">
-                    </div>
+                    <div class="text-center py-20 text-slate-400 font-bold">📡 正在連接 Aiven 雲端資料庫...</div>
+                </div>
             </div>
-            
         </div>
     </div>
-
-    <div id="map" class="w-full h-full absolute inset-0 z-0"></div>
-
+    
+    <div id="map" class="absolute top-0 left-0 w-full h-full z-[1000]"></div>
+    
     <script src="script.js"></script>
 </body>
 </html>
