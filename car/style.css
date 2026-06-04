@@ -1,125 +1,62 @@
-/* ==========================================================================
-   全域基礎重置與地圖美化
-   ========================================================================== */
+/* 全域與重置 */
 html, body { 
     height: 100vh; 
     width: 100vw; 
     margin: 0; 
     padding: 0; 
-    background-color: #030712;
+    background-color: #f8fafc;
 }
 
-/* 隱藏原生滾動條，維持極簡美觀 */
 .no-scrollbar::-webkit-scrollbar { 
     display: none; 
 }
-.no-scrollbar {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-}
 
-/* 強制遮蔽 Leaflet 原生的導航路徑容器框，改用自訂的頂部頂級 UI */
 .leaflet-routing-container { 
     display: none !important; 
 }
 
-/* 移除 Leaflet 控制項邊框 */
-.leaflet-bar {
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.5) !important;
+/* 🚀 GPU 硬體加速專用類別：大幅降低 CPU 重繪率，解決崩潰核心問題 */
+.layer-accelerated {
+    will-change: transform;
+    backface-visibility: hidden;
+    transform: translateZ(0);
 }
 
-/* ==========================================================================
-   未來感毛玻璃核心機制 (Glassmorphism Core Styles)
-   ========================================================================== */
-.glass-panel-base {
-    background: rgba(15, 23, 42, 0.45) !important;
-    backdrop-filter: blur(18px) saturate(180%) !important;
-    -webkit-backdrop-filter: blur(18px) saturate(180%) !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+/* 導航提示框動態觸發 */
+#nav-header.active { 
+    transform: translateY(0) translateZ(0); 
 }
 
-/* 停車位資訊卡片基礎樣式 */
-.parking-card {
-    background: rgba(255, 255, 255, 0.04) !important;
-    backdrop-filter: blur(10px) !important;
-    -webkit-backdrop-filter: blur(10px) !important;
-    border: 1px solid rgba(255, 255, 255, 0.06) !important;
-    border-radius: 16px !important;
-    transition: all 0.4s cubic-bezier(0.25, 1, 0.5, 1) !important;
-}
-
-.parking-card:hover {
-    background: rgba(255, 255, 255, 0.09) !important;
-    border-color: rgba(6, 182, 212, 0.35) !important;
-    box-shadow: 0 8px 25px rgba(6, 182, 212, 0.15) !important;
-    transform: translateY(-2px);
-}
-
-/* 地圖選取或雙向連動高亮啟動樣式 (Glow Card) */
-.top-card { 
-    background: rgba(6, 182, 212, 0.12) !important;
-    border: 1.5px solid rgba(6, 182, 212, 0.6) !important; 
-    box-shadow: 0 0 30px rgba(6, 182, 212, 0.3) !important;
-}
-
-/* ==========================================================================
-   Leaflet 地圖彈出視窗 (Popup) 完美毛玻璃魔改
-   ========================================================================== */
+/* Leaflet 彈窗美化 */
 .leaflet-popup-content-wrapper { 
-    background: rgba(10, 15, 30, 0.75) !important; 
-    backdrop-filter: blur(16px) saturate(170%) !important;
-    -webkit-backdrop-filter: blur(16px) saturate(170%) !important;
-    border: 1px solid rgba(6, 182, 212, 0.3) !important;
-    border-radius: 20px !important; 
-    padding: 0 !important; 
-    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.6) !important; 
-    color: #f8fafc !important;
+    border-radius: 16px; 
+    padding: 0; 
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12); 
+    border: 1px solid rgba(226, 232, 240, 0.8); 
 }
-
 .leaflet-popup-content { 
-    margin: 0 !important; 
+    margin: 0; 
     width: auto !important; 
 }
-
-.leaflet-popup-tip { 
-    background: rgba(10, 15, 30, 0.75) !important; 
-    border-left: 1px solid rgba(6, 182, 212, 0.3) !important;
-    border-bottom: 1px solid rgba(6, 182, 212, 0.3) !important;
-    box-shadow: none !important;
-}
-
 .leaflet-popup-close-button { 
     top: 12px !important; 
     right: 12px !important; 
     color: #94a3b8 !important; 
     font-size: 16px !important;
-    transition: color 0.2s;
-}
-.leaflet-popup-close-button:hover {
-    color: #38bdf8 !important;
 }
 
-/* ==========================================================================
-   動態特效與 Marker 樣式
-   ========================================================================== */
-/* 導航啟動框動畫控制 */
-#nav-header.active { 
-    transform: translateY(0); 
-}
-
-/* 導航車輛定位圖標與雷達波特效 */
+/* 🚘 定位車輛圖示特效（改用高效 Transform 動畫，防止卡頓） */
 .car-marker-container { 
-    width: 46px; 
-    height: 46px; 
+    width: 44px; 
+    height: 44px; 
     display: flex; 
     align-items: center; 
     justify-content: center; 
-    transition: transform 0.4s cubic-bezier(0.1, 0.8, 0.25, 1); 
+    transition: transform 0.4s cubic-bezier(0.25, 1, 0.5, 1); 
 }
 .car-marker { 
-    font-size: 34px; 
-    filter: drop-shadow(0px 0px 10px rgba(6, 182, 212, 0.8)); 
+    font-size: 32px; 
+    filter: drop-shadow(0px 4px 6px rgba(15, 23, 42, 0.25)); 
     line-height: 1; 
 }
 .car-marker-container::after { 
@@ -127,81 +64,101 @@ html, body {
     position: absolute; 
     width: 36px; 
     height: 36px; 
-    background: rgba(6, 182, 212, 0.35); 
-    border: 1.5px solid rgba(6, 182, 212, 0.8);
+    background: rgba(37, 99, 235, 0.25); 
     border-radius: 50%; 
     z-index: -1; 
-    animation: pulseRadar 2s infinite ease-out; 
+    animation: gpu-pulse 2.2s cubic-bezier(0.16, 1, 0.3, 1) infinite; 
 }
 
-@keyframes pulseRadar { 
-    0% { transform: scale(0.6); opacity: 1; } 
-    100% { transform: scale(2.2); opacity: 0; } 
+@keyframes gpu-pulse { 
+    0% { transform: scale(0.75); opacity: 1; } 
+    100% { transform: scale(2.1); opacity: 0; } 
 }
 
-/* 目的地跳躍大頭針 */
+/* 📌 目的地大頭針掉落與跳動特效 */
 .dest-marker-container { 
     display: flex; 
     align-items: center; 
     justify-content: center; 
-    width: 44px; 
-    height: 44px; 
-    animation: neonBounce 0.8s infinite alternate cubic-bezier(0.45, 0.05, 0.55, 0.95); 
+    width: 42px; 
+    height: 42px; 
+    animation: gpu-bounce 0.6s infinite alternate cubic-bezier(0.25, 1, 0.5, 1); 
 }
 .dest-marker { 
-    font-size: 42px; 
-    filter: drop-shadow(0px 8px 12px rgba(244, 63, 94, 0.6)); 
+    font-size: 38px; 
+    filter: drop-shadow(0px 6px 8px rgba(15, 23, 42, 0.3)); 
     line-height: 1; 
 }
 
-@keyframes neonBounce { 
+@keyframes gpu-bounce { 
     0% { transform: translateY(0); } 
-    100% { transform: translateY(-14px); } 
+    100% { transform: translateY(-12px); } 
 }
 
-/* 搜尋落點粒子特效 */
+/* 列表推薦標籤 */
+.recommend-badge { 
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); 
+    color: white; 
+    padding: 3px 8px; 
+    border-radius: 6px;
+    font-size: 10px; 
+    font-weight: 900; 
+    letter-spacing: 0.5px; 
+    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2);
+}
+
+/* 雙向連動高亮卡片樣式 */
+.top-card { 
+    border: 2px solid #2563eb !important; 
+    background-color: #f0f5ff !important; 
+    box-shadow: 0 6px 20px rgba(37, 99, 235, 0.1) !important;
+    transform: translateY(-2px);
+}
+
+/* 星星收藏樣式 */
+.fav-star { 
+    cursor: pointer; 
+    transition: transform 0.2s ease, color 0.2s ease; 
+}
+.fav-star:active {
+    transform: scale(1.3);
+}
+.fav-star.active { 
+    color: #eab308; 
+}
+.fav-star.inactive { 
+    color: #cbd5e1; 
+}
+
+/* 🌟 地圖常駐店名標籤樣式 */
+.custom-map-label {
+    background-color: #ffffff !important;
+    color: #10b981 !important;
+    border: 2px solid #10b981 !important;
+    border-radius: 20px !important;
+    padding: 4px 12px !important;
+    font-size: 12px !important;
+    font-weight: 800 !important;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12) !important;
+    white-space: nowrap !important;
+    transition: all 0.2s ease;
+}
+
+/* 搜尋結果落下動畫 */
 .target-marker-container { 
     display: flex; 
     justify-content: center; 
     align-items: flex-end; 
     width: 40px; 
-    height: 40px; 
-    animation: smoothDrop 0.6s cubic-bezier(0.25, 1, 0.5, 1) forwards; 
+    height: 40px;
+    animation: dropDown 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; 
 }
 .target-marker { 
-    font-size: 38px; 
-    filter: drop-shadow(0 0 12px rgba(168, 85, 247, 0.7)); 
+    font-size: 36px;
+    filter: drop-shadow(0 4px 6px rgba(0,0,0,0.2));
 }
 
-@keyframes smoothDrop {
+@keyframes dropDown {
     0% { transform: translateY(-100px); opacity: 0; }
-    60% { transform: translateY(10px); }
     100% { transform: translateY(0); opacity: 1; }
-}
-
-/* 自訂地圖店名氣泡樣式 */
-.custom-map-label {
-    background-color: rgba(15, 23, 42, 0.85) !important;
-    backdrop-filter: blur(8px) !important;
-    color: #38bdf8 !important;
-    border: 1px solid rgba(56, 189, 248, 0.5) !important;
-    border-radius: 20px !important;
-    padding: 5px 12px !important;
-    font-size: 12px !important;
-    font-weight: 900 !important;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.4) !important;
-    white-space: nowrap !important;
-}
-.custom-map-label::before {
-    border-right-color: rgba(56, 189, 248, 0.5) !important;
-}
-
-/* 手機版響應式微調 */
-@media (min-width: 768px) { 
-    #bottom-sheet { 
-        height: auto !important; 
-        min-height: 0 !important; 
-        flex: 1 !important; 
-        transform: none !important; 
-    } 
 }
