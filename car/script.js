@@ -308,7 +308,7 @@ async function fetchGooglePlacesFromBackend(queryStr) {
 }
 
 // ==========================================
-// 5. 搜尋功能
+// 5. 升級版全方位搜尋系統 (Google 式整合搜尋)
 // ==========================================
 async function searchLocation() {
     const queryInput = document.getElementById('searchInput');
@@ -316,40 +316,49 @@ async function searchLocation() {
     if (!rawQuery) return clearSearchAndLocate();
     
     collapseBottomSheet();
-    
+    const listEl = document.getElementById('content-list');
+    if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-blue-500 font-bold animate-pulse">🔍 全方位搜尋「${rawQuery}」中...</div>`;
+
+    // 1. 本地停車場資料比對
     let localMatches = parkingData.filter(p => 
         smartMatch(p.name, rawQuery) || smartMatch(p.destName, rawQuery) || smartMatch(p.address, rawQuery) || smartMatch(p.category, rawQuery)
     );
-    const listEl = document.getElementById('content-list');
-    if (localMatches.length > 0) {
-        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-blue-500 font-bold">🔍 找到 ${localMatches.length} 筆相關地點...</div>`;
-        window.currentKeyword = rawQuery;
-        searchedLocation = null; 
-        handleFilter(); 
-        
-        const bounds = L.latLngBounds(localMatches.map(p => [p.lat, p.lng]));
-        map.fitBounds(bounds, { padding: [50, 50], animate: true, maxZoom: 15 });
-        return;
+
+    // 2. Google Places API 搜尋
+    let googlePlaces = [];
+    try {
+        googlePlaces = await fetchGooglePlacesFromBackend(rawQuery);
+    } catch (e) {
+        console.warn("Google 地點搜尋失敗", e);
     }
 
-    window.currentKeyword = null;
-    if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">🌍 正在 Google 地圖搜尋「${rawQuery}」...</div>`;
-    
-    try {
-        const data = await fetchGooglePlacesFromBackend(rawQuery);
-        if (data && data.length > 0) {
-            const place = data[0];
+    // 3. 綜合搜尋結果處置
+    if (localMatches.length > 0) {
+        // 如果本地找到了匹配的停車場，優先列出
+        window.currentKeyword = rawQuery;
+        searchedLocation = null; 
+        
+        // 若同時有 Google 地標結果，標記第一個地點為目的地
+        if (googlePlaces && googlePlaces.length > 0) {
+            const place = googlePlaces[0];
             searchedLocation = [parseFloat(place.lat), parseFloat(place.lng)];
             createSearchMarker(place.name, searchedLocation[0], searchedLocation[1], place.address);
-            
-            fetchTaipeiParkingData(); 
-            map.flyTo(searchedLocation, 16, {animate: true, duration: 1.5}); 
-            collapseBottomSheet();
-        } else {
-            if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">找不到「${rawQuery}」<br><span class="text-xs text-slate-400">請嘗試輸入更具體的名稱</span></div>`;
         }
-    } catch (err) { 
-        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500">搜尋失敗，請稍後再試</div>`;
+        
+        handleFilter(); 
+        const bounds = L.latLngBounds(localMatches.map(p => [p.lat, p.lng]));
+        map.fitBounds(bounds, { padding: [50, 50], animate: true, maxZoom: 15 });
+    } else if (googlePlaces && googlePlaces.length > 0) {
+        // 如果本地無直接對應名稱，採用 Google 搜尋結果的第一個地點作為目標中心
+        const place = googlePlaces[0];
+        searchedLocation = [parseFloat(place.lat), parseFloat(place.lng)];
+        window.currentKeyword = null;
+        
+        createSearchMarker(place.name, searchedLocation[0], searchedLocation[1], place.address);
+        fetchTaipeiParkingData(); 
+        map.flyTo(searchedLocation, 16, {animate: true, duration: 1.5}); 
+    } else {
+        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">找不到「${rawQuery}」相關地點<br><span class="text-xs text-slate-400">請嘗試更換搜尋關鍵字</span></div>`;
     }
 }
 
@@ -401,8 +410,7 @@ function handleFilter() {
         data = data.map(p => ({ ...p, distance: calculateDistance(refLocation[0], refLocation[1], p.lat, p.lng) }));
         if (!window.currentKeyword && radiusMeters < 99999) {
             data = data.filter(p => p.distance <= (radiusMeters / 1000));
-            // 請找到這一行，將顏色改為優雅墨藍與溫柔襯底透明度
-        radiusCircle = L.circle(refLocation, { color: '#1b2a47', fillColor: '#1b2a47', fillOpacity: 0.05, radius: radiusMeters, weight: 1.5 }).addTo(map);
+            radiusCircle = L.circle(refLocation, { color: '#1b2a47', fillColor: '#1b2a47', fillOpacity: 0.05, radius: radiusMeters, weight: 1.5 }).addTo(map);
         }
 
         if (currentSortMode === 'distance') {
@@ -434,13 +442,9 @@ function handleFilter() {
 window.highlightCardInList = function(id) {
     const targetCard = document.getElementById(`card-${id}`);
     if (targetCard) {
-        // 清除所有卡片的藍色框框
         document.querySelectorAll('.parking-card').forEach(card => card.classList.remove('top-card'));
-        // 幫目標卡片加上藍色框框
         targetCard.classList.add('top-card');
-        // 讓列表自動滾動到該卡片的位置 (置中顯示)
         targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        // 如果在手機版，自動展開抽屜
         if (window.innerWidth < 768 && !isSheetExpanded) {
             toggleBottomSheet();
         }
@@ -458,7 +462,6 @@ function renderMapMarkers(data) {
     data.forEach(item => {
         const isFull = item.car.a === 0;
         
-        // 🎨 溫馨微可愛狀態色彩優化：學院墨藍(無即時)、柔和草莓紅(客滿)、焦糖琥珀(車位緊縮)、森林松綠(車位充足)
         const color = item.car.a < 0 ? '#1b2a47' : (isFull ? '#e11d48' : (item.car.a <= 10 ? '#d97706' : '#0d9488'));
         const displayNum = item.car.a < 0 ? 'P' : item.car.a;
 
@@ -536,7 +539,6 @@ function renderList(data, isUsingDest) {
     data.forEach((item, index) => {
         const isFull = item.car.a === 0, hasNoData = item.car.a < 0;
         
-        // 🎨 色彩統一調整：學院墨藍(無資料)、溫馨草莓紅(滿車)、質感森林綠(有車位)
         const colorClass = hasNoData ? 'bg-[#1b2a47] text-[#fdfbf7]' : (isFull ? 'bg-[#e11d48] text-white' : 'bg-[#0d9488] text-white');
         const isFav = favorites.includes(item.id);
         const distStr = item.distance ? `${item.distance.toFixed(2)} km` : "計算中";
@@ -580,13 +582,10 @@ function renderList(data, isUsingDest) {
     });
 }
 
-// 🌟 列表 ➡️ 地圖 的反向連動功能：點擊後地圖自動開 Popup
 function selectCard(id, lat, lng) {
     collapseBottomSheet();
-    // 飛到目標位置
     map.flyTo([lat, lng], 17, {duration: 1.5});
     
-    // 加上藍色框框
     document.querySelectorAll('.parking-card').forEach(card => card.classList.remove('top-card'));
     const activeCard = document.getElementById(`card-${id}`);
     if (activeCard) {
@@ -594,9 +593,7 @@ function selectCard(id, lat, lng) {
         activeCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
-    // ✨ 終極連動：自動幫你把地圖上的資訊彈窗打開！
     if (window.markersMap && window.markersMap[id]) {
-        // 稍微延遲一下等地圖飛過去，確保 MarkerCluster 解開群組後再彈出視窗
         setTimeout(() => {
             window.markersMap[id].openPopup();
         }, 300);
@@ -630,7 +627,6 @@ function updateRoute() {
             if (i === n - 1) return L.marker(waypoint.latLng, { icon: L.divIcon({ html: `<div class="dest-marker-container"><div class="dest-marker">🚩</div></div>`, className: 'custom-div-icon', iconAnchor: [20, 40] }), zIndexOffset: 1000 });
             return null; 
         }, 
-        // 請找到 L.Routing.control 裡面的 lineOptions 或是相關樣式，將顏色修改為：
         lineOptions: { styles: [{ color: '#1b2a47', weight: 8, opacity: 0.8 }] },
         show: false, addWaypoints: false,
         router: L.Routing.osrmv1({ serviceUrl: 'https://router.project-osrm.org/route/v1', profile: 'driving' }) 
@@ -700,7 +696,7 @@ window.toggleFav = function(id) {
 }
 
 // ==========================================
-// 9. 下拉智慧聯想選單
+// 9. 全方位下拉智慧聯想選單
 // ==========================================
 function initAutocomplete() {
     const searchInput = document.getElementById('searchInput');
@@ -723,30 +719,50 @@ function initAutocomplete() {
             if (!query) { autocompleteList.classList.add('hidden'); return; }
 
             debounceTimer = setTimeout(async () => {
+                // 同時搜尋 Google 地標與本地停車場
                 const suggestions = await fetchGooglePlacesFromBackend(query);
+                const localMatches = parkingData.filter(p => smartMatch(p.name, query) || smartMatch(p.address, query));
 
+                autocompleteList.innerHTML = '';
+                
+                // 全域廣域搜尋觸發鈕
+                const searchAllDiv = document.createElement('div');
+                searchAllDiv.className = 'p-3 hover:bg-[#f4ece1]/40 cursor-pointer border-b border-[#e6dfd5]/40 flex items-center gap-3 transition';
+                searchAllDiv.innerHTML = `
+                        <div class="w-8 h-8 rounded-full bg-[#f4ece1] text-[#1b2a47] flex items-center justify-center font-bold flex-shrink-0">🔍</div>
+                        <div class="text-sm text-stone-800 font-bold flex-1">全方位搜尋「${query}」與周邊車位</div>`;
+                searchAllDiv.addEventListener('click', () => { autocompleteList.classList.add('hidden'); searchLocation(); });
+                autocompleteList.appendChild(searchAllDiv);
+
+                // 呈現本地停車場比對選項
+                localMatches.slice(0, 3).forEach(p => {
+                    const div = document.createElement('div');
+                    div.className = 'p-3 hover:bg-[#faf6f0] cursor-pointer border-b border-[#e6dfd5]/40 flex items-center gap-3 transition';
+                    div.innerHTML = `
+                        <div class="w-8 h-8 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold flex-shrink-0">🅿️</div>
+                        <div class="flex flex-col overflow-hidden flex-1">
+                            <div class="text-sm text-stone-800 font-bold truncate">${p.name}</div>
+                            <div class="text-[11px] text-stone-400 truncate">停車場 • ${p.address}</div>
+                        </div>`;
+                    div.addEventListener('click', () => {
+                        searchInput.value = p.name;
+                        autocompleteList.classList.add('hidden');
+                        searchLocation();
+                    });
+                    autocompleteList.appendChild(div);
+                });
+
+                // 呈現 Google 地圖建議
                 if (suggestions && suggestions.length > 0) {
-                    autocompleteList.innerHTML = '';
-                    
-                    const searchAllDiv = document.createElement('div');
-                    searchAllDiv.className = 'p-3 hover:bg-[#f4ece1]/40 cursor-pointer border-b border-[#e6dfd5]/40 flex items-center gap-3 transition';
-                    searchAllDiv.innerHTML = `
-                            <div class="w-8 h-8 rounded-full bg-[#f4ece1] text-[#1b2a47] flex items-center justify-center font-bold flex-shrink-0">🔍</div>
-                            <div class="text-sm text-stone-800 font-bold flex-1">搜尋「${query}」台北周邊車位</div>`;
-                    searchAllDiv.addEventListener('click', () => { autocompleteList.classList.add('hidden'); searchLocation(); });
-                    autocompleteList.appendChild(searchAllDiv);
-
                     suggestions.forEach(place => {
                         const div = document.createElement('div');
-                        // 聯想清單的迴圈生成處更改：
                         div.className = 'p-3 hover:bg-[#faf6f0] cursor-pointer border-b border-[#e6dfd5]/40 last:border-0 flex items-center gap-3 transition';
                         div.innerHTML = `
                             <div class="w-8 h-8 rounded-full bg-[#fbf9f6] text-stone-500 flex items-center justify-center font-bold flex-shrink-0">📍</div>
                             <div class="flex flex-col overflow-hidden flex-1">
-                            <div class="text-sm text-stone-800 font-bold truncate">${place.name}</div>
-                            <div class="text-[11px] text-stone-400 truncate">${place.address}</div>
-                        </div>
-`;
+                                <div class="text-sm text-stone-800 font-bold truncate">${place.name}</div>
+                                <div class="text-[11px] text-stone-400 truncate">${place.address}</div>
+                            </div>`;
                         
                         div.addEventListener('click', () => {
                             searchInput.value = place.name; 
@@ -755,21 +771,18 @@ function initAutocomplete() {
                             window.currentKeyword = null; 
                             
                             createSearchMarker(place.name, searchedLocation[0], searchedLocation[1], place.address);
-                            
                             fetchTaipeiParkingData(); 
                             map.flyTo(searchedLocation, 16, {animate: true, duration: 1.5}); 
                             collapseBottomSheet();
                         });
                         autocompleteList.appendChild(div);
                     });
-
-                    autocompleteList.classList.remove('hidden');
-                } else {
-                    autocompleteList.innerHTML = `<div class="p-4 text-center text-sm text-slate-400 font-bold">找不到「${query}」😢<br><span class="text-xs font-normal">請嘗試輸入更精確的名稱</span></div>`;
-                    autocompleteList.classList.remove('hidden');
                 }
-            }, 500); 
+
+                autocompleteList.classList.remove('hidden');
+            }, 300); 
         });
+
         document.addEventListener('click', function(e) {
             if (!searchInput.contains(e.target) && !autocompleteList.contains(e.target)) {
                 autocompleteList.classList.add('hidden');
@@ -798,7 +811,7 @@ function createSearchMarker(name, lat, lng, address = "") {
         offset: L.point(0, -35)
     });
     const searchQuery = address ? `${name} ${address}` : name;
-    const googleMapsUrl = `http://maps.google.com/?q=$${encodeURIComponent(searchQuery)}`;
+    const googleMapsUrl = `http://maps.google.com/?q=${encodeURIComponent(searchQuery)}`;
     const popupContent = `
         <div style="padding: 10px; font-family: sans-serif; min-w-[180px]; text-align: left;">
             <h4 style="margin: 0 0 4px 0; font-size: 14px; color: #1e293b; font-weight: bold;">🔍 ${name}</h4>
@@ -862,12 +875,11 @@ function buildSmartTransitBadge(item) {
     `;
 }
 
-
 // ==========================================
 // 🎙️ 全自動免持語音控制系統 (Continuous Web Speech API)
 // ==========================================
 let voiceRecognition;
-let isVoiceActive = false; // 控制免持全自動模式的總開關
+let isVoiceActive = false;
 
 function initVoiceControl() {
     const SpeechRecognition = window.ShareSpeechRecognition || window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -877,11 +889,10 @@ function initVoiceControl() {
     }
     
     voiceRecognition = new SpeechRecognition();
-    voiceRecognition.continuous = true;       // 🔥 關鍵核心：開啟連續辨識，說完話不會自動結束
-    voiceRecognition.interimResults = false;   // 只接收最終確認的字串，避免中途短句干擾
-    voiceRecognition.lang = 'zh-TW';           // 設定語系為台灣中文
+    voiceRecognition.continuous = true;
+    voiceRecognition.interimResults = false;
+    voiceRecognition.lang = 'zh-TW';
 
-    // 語音助理啟動時：按鈕變成高亮閃爍的「錄音中紅點 🛑」
     voiceRecognition.onstart = () => {
         const btn = document.getElementById('voiceBtn');
         if (btn) {
@@ -890,9 +901,7 @@ function initVoiceControl() {
         }
     };
 
-    // 當語音因為短暫靜音、環境噪音或瀏覽器秒數限制而斷線時的處理
     voiceRecognition.onend = () => {
-        // ✨ 密技：如果使用者沒有手動關閉開關，代表是瀏覽器自動斷線，我們立即啟動「無縫無感重連」！
         if (isVoiceActive) {
             setTimeout(() => {
                 if (isVoiceActive) {
@@ -904,7 +913,6 @@ function initVoiceControl() {
                 }
             }, 300);
         } else {
-            // 真正關閉狀態，回復成原本微調的灰白麥克風外觀
             const btn = document.getElementById('voiceBtn');
             if (btn) {
                 btn.innerHTML = "🎙️";
@@ -913,15 +921,13 @@ function initVoiceControl() {
         }
     };
 
-    // 接收即時語音辨識定案結果
     voiceRecognition.onresult = (event) => {
-        // 只拿最新產生、確認定案的那一句話 (resultIndex)
         const currentResultIndex = event.resultIndex;
         const isFinal = event.results[currentResultIndex].isFinal;
         
         if (isFinal) {
             let resultText = event.results[currentResultIndex][0].transcript.trim();
-            resultText = resultText.replace(/[。？，！]/g, ""); // 清除結尾標點符號
+            resultText = resultText.replace(/[。？，！]/g, "");
             
             if (resultText) {
                 handleVoiceCommand(resultText);
@@ -929,7 +935,6 @@ function initVoiceControl() {
         }
     };
 
-    // 權限或硬體錯誤處理
     voiceRecognition.onerror = (event) => {
         console.error("語音監聽異常:", event.error);
         if (event.error === 'not-allowed') {
@@ -939,29 +944,25 @@ function initVoiceControl() {
     };
 }
 
-// 免持模式切換開關 (點擊一次，終身監聽；再點擊一次即可完全關閉)
 window.toggleContinuousVoice = function() {
     if (!voiceRecognition) initVoiceControl();
-    
     if (!voiceRecognition) {
-        alert("此瀏覽器不支援語音辨識（建議使用桌面版 Chrome 或 iOS Safari 行動版）");
+        alert("此瀏覽器不支援語音辨識");
         return;
     }
 
     if (isVoiceActive) {
         isVoiceActive = false;
-        voiceRecognition.stop(); // 關閉語音
+        voiceRecognition.stop();
     } else {
         isVoiceActive = true;
-        voiceRecognition.start(); // 啟動監聽
+        voiceRecognition.start();
     }
 };
 
-// 🧠 核心語音決策：完美將語音字詞對接到打字搜尋
 function handleVoiceCommand(cmd) {
     console.log("【免持助理聽到語音】: ", cmd);
 
-    // 1. 系統控制功能優先判斷
     if (cmd.includes("重新定位") || cmd.includes("清除搜尋") || cmd.includes("定位")) {
         if (typeof clearSearchAndLocate === "function") clearSearchAndLocate();
         return;
@@ -979,41 +980,37 @@ function handleVoiceCommand(cmd) {
         return;
     }
 
-    // 2. 搜尋字詞優化處理：如果說「搜尋 台北車站」或「我要找 101」，自動把開頭冗詞過濾掉
     let searchKeyword = cmd;
     if (cmd.startsWith("搜尋") || cmd.startsWith("尋找") || cmd.startsWith("我要找") || cmd.startsWith("幫我找")) {
         searchKeyword = cmd.replace(/^(搜尋|尋找|我要找|幫我找)/, "").trim();
     }
     
-    // 3. 執行與打字完全 100% 相同的搜尋流程
     if (searchKeyword) {
         executeVoiceSearch(searchKeyword);
     }
 }
 
-// 實作與打字完全一模一樣的搜尋流程
 function executeVoiceSearch(keyword) {
     const inputEl = document.getElementById('searchInput');
     if (inputEl && typeof searchLocation === "function") {
-        inputEl.value = keyword; // 1. 精準填入打字搜尋框（使用者能在畫面上看到字）
-        searchLocation();        // 2. 觸發核心搜尋主程式，自動走「本地比對」或「Google圖資穿透」流程！
+        inputEl.value = keyword;
+        searchLocation();
     }
 }
- // ==========================================
+
+// ==========================================
 // 🚗 [特色 3] 我停好了！尋車與計時防收費小幫手邏輯
 // ==========================================
 let parkedMarker = null;
 let parkedInterval = null;
 
 window.toggleParkedStatus = function() {
-    // 優先使用使用者目前經緯度，若定位尚未載入則抓目前地圖畫面中心點
     const targetPos = userLocation || [map.getCenter().lat, map.getCenter().lng];
     if (!targetPos) {
         alert("目前無法取得定位，請稍後再試！");
         return;
     }
 
-    // 提示車主輸入費率（貼心的防呆預設 $40/hr）
     const rateInput = prompt("請輸入此停車場的每小時費率（純數字，例如: 40，不計費請填0）：", "40");
     const hourlyRate = parseInt(rateInput, 10) || 0;
 
@@ -1034,13 +1031,11 @@ function startParkedTimerLoop() {
 
     if (!lat || !lng || !startTime) return;
 
-    // UI 切換展示
     document.getElementById('parking-helper-zone').classList.add('hidden');
     const panel = document.getElementById('parkedTimerPanel');
     panel.classList.remove('hidden');
     panel.classList.add('flex');
 
-    // 建立地圖上的專屬愛車圖示
     if (parkedMarker) map.removeLayer(parkedMarker);
     
     const parkedIcon = L.divIcon({
@@ -1058,11 +1053,10 @@ function startParkedTimerLoop() {
         </div>
     `);
 
-    // 動態計算費用與時間計時器
     const updateDisplay = () => {
         const now = Date.now();
         const diffMs = now - parseInt(startTime);
-        const diffMins = Math.max(1, Math.floor(diffMs / 1000 / 60)); // 最少顯示1分鐘
+        const diffMins = Math.max(1, Math.floor(diffMs / 1000 / 60));
         
         let timeStr = `${diffMins} 分鐘`;
         if (diffMins >= 60) {
@@ -1071,7 +1065,6 @@ function startParkedTimerLoop() {
             timeStr = `${hrs} 小時 ${mins} 分`;
         }
         
-        // 計費模型：不滿1小時以1小時計（常見的公有/民營標準）
         const hoursBilled = Math.ceil(diffMins / 60);
         const totalCost = hoursBilled * hourlyRate;
 
@@ -1081,7 +1074,7 @@ function startParkedTimerLoop() {
 
     updateDisplay();
     if (parkedInterval) clearInterval(parkedInterval);
-    parkedInterval = setInterval(updateDisplay, 30000); // 每 30 秒自動精準重算
+    parkedInterval = setInterval(updateDisplay, 30000);
 }
 
 window.clearParkedStatus = function() {
@@ -1107,7 +1100,6 @@ window.navToMyCar = function() {
     const lng = localStorage.getItem('p_parked_lng');
     if (!lat || !lng) return;
 
-    // 虛擬包裝出一個與原本 startNav 相容的愛車目的地物件
     const fakeCarItem = {
         name: "我的愛車 🚗",
         lat: parseFloat(lat),
@@ -1115,10 +1107,9 @@ window.navToMyCar = function() {
     };
     
     const safeItemStr = encodeURIComponent(JSON.stringify(fakeCarItem));
-    startNav(safeItemStr); // 完美直接無縫調用您現有的導航連動引擎
+    startNav(safeItemStr);
 };
 
-// 讓網頁重整時，自動檢查上一次停在 localStorage 的車子是否還在計時
 function checkSavedParkedStatus() {
     if (localStorage.getItem('p_parked_lat')) {
         startParkedTimerLoop();
