@@ -75,7 +75,7 @@ function initGoogleMap() {
 }
 
 // ==========================================
-// 2. 行動端行動抽屜 (Bottom Sheet) 拖曳邏輯
+// 2. 行動端行動抽屜 (Bottom Sheet) 拖曳邏輯 (加入 60fps 效能優化)
 // ==========================================
 window.toggleBottomSheet = function() {
     if (window.innerWidth >= 768 || !bottomSheet) return;
@@ -98,6 +98,8 @@ function collapseBottomSheet() {
     }
 }
 
+let isDraggingSheet = false; // 新增：防止高頻觸發的鎖定閥
+
 if (dragHandle && bottomSheet) {
     dragHandle.addEventListener('touchstart', (e) => {
         startY = e.touches[0].clientY;
@@ -106,17 +108,27 @@ if (dragHandle && bottomSheet) {
     }, {passive: true});
 
     dragHandle.addEventListener('touchmove', (e) => {
-        let newHeight = currentHeight + (startY - e.touches[0].clientY);
-        const winH = window.innerHeight;
-        if (newHeight > winH * 0.85) newHeight = winH * 0.85; 
-        if (newHeight < winH * 0.20) newHeight = winH * 0.20; 
-        bottomSheet.style.height = `${newHeight}px`;
+        // 如果正在渲染上一幀，就直接跳過，避免瀏覽器過載
+        if (isDraggingSheet) return; 
+        isDraggingSheet = true;
+
+        // 呼叫瀏覽器原生 API，確保在最佳時機 (60fps) 更新畫面
+        requestAnimationFrame(() => {
+            let newHeight = currentHeight + (startY - e.touches[0].clientY);
+            const winH = window.innerHeight;
+            if (newHeight > winH * 0.85) newHeight = winH * 0.85; 
+            if (newHeight < winH * 0.20) newHeight = winH * 0.20; 
+            
+            bottomSheet.style.height = `${newHeight}px`;
+            isDraggingSheet = false; // 渲染完成，解鎖
+        });
     }, {passive: true});
 
     dragHandle.addEventListener('touchend', () => {
         bottomSheet.style.transition = 'height 0.3s cubic-bezier(0.25, 1, 0.5, 1)';
         const finalHeight = bottomSheet.getBoundingClientRect().height;
         const winH = window.innerHeight;
+        
         if (finalHeight > winH * 0.5) {
             bottomSheet.style.height = '85vh';
             isSheetExpanded = true;
