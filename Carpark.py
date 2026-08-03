@@ -39,7 +39,7 @@ DB_CONFIG = {
     'host': 'mysql-14bf0d58-iljsauw-7901.c.aivencloud.com',
     'port': 11576,
     'database': 'defaultdb',
-    'ssl_ca': 'ca.pem',       
+    'ssl_ca': 'ca.pem',      
 }
 
 URL_DESC = "https://tcgbusfs.blob.core.windows.net/blobtcmsv/TCMSV_alldesc.json"
@@ -147,12 +147,10 @@ def sync_data_to_db():
 # 🧠 智慧轉乘決策引擎 (核心商業邏輯)
 # =========================================================
 def calculate_best_transit_mode(distance: float, pure_walk_time: float, yb_data: dict = None, metro_data: dict = None) -> dict:
-    # 預設最佳方案為步行
     best_mode = 'WALK'
     best_time = pure_walk_time
     recommendation_reason = ""
 
-    # 規則一：距離較近時，預設為步行 (大約 800m 內或 10 分鐘內)
     if pure_walk_time <= 10 or distance <= 800:
         return {
             "mode": "WALK",
@@ -160,19 +158,14 @@ def calculate_best_transit_mode(distance: float, pure_walk_time: float, yb_data:
             "reason": ""
         }
 
-    # 規則二：YouBike 真實時間校正
     total_yb_time = float('inf')
     if yb_data and yb_data.get('is_valid'):
-        # 步行至起點 ＋ 騎乘 ＋ 終點步行 ＋ 借還車操作緩衝(2分鐘)
         total_yb_time = yb_data.get('walk_to_start', 0) + yb_data.get('ride_time', 0) + yb_data.get('walk_from_end', 0) + 2
 
-    # 規則三：捷運轉乘長途限制
     total_metro_time = float('inf')
     if distance > 2000 and metro_data and metro_data.get('is_valid'):
-        # 步行至起站 ＋ 乘車 ＋ 終點步行 ＋ 進出站等候緩衝(5分鐘)
         total_metro_time = metro_data.get('walk_to_start', 0) + metro_data.get('ride_time', 0) + metro_data.get('walk_from_end', 0) + 5
 
-    # 🏆 競速比較
     if total_yb_time < best_time:
         best_mode = 'YOUBIKE'
         best_time = total_yb_time
@@ -183,7 +176,6 @@ def calculate_best_transit_mode(distance: float, pure_walk_time: float, yb_data:
         best_time = total_metro_time
         recommendation_reason = "長途移動，搭乘大眾運輸最節省時間🚇"
 
-    # 規則四：轉乘防呆與最小效益閾值 (只省不到 3 分鐘就不值得折騰)
     if best_mode != 'WALK':
         time_saved = pure_walk_time - best_time
         if time_saved <= 3:
@@ -195,7 +187,7 @@ def calculate_best_transit_mode(distance: float, pure_walk_time: float, yb_data:
 
     return {
         "mode": best_mode,
-        "total_time": int(best_time), # 回傳整數分鐘數
+        "total_time": int(best_time), 
         "reason": recommendation_reason
     }
 
@@ -249,8 +241,12 @@ def search_places():
         return jsonify({"error": "伺服器缺少 Google API Key 環境變數"}), 500
 
     url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+    
+    # 🌟 修正：移除強制加「台北」的限制，改用 location 偏好中心點與 20 公里半徑
     params = {
-        'query': f"{query} 台北",
+        'query': query,
+        'location': '25.0339,121.5644', 
+        'radius': '20000',            
         'language': 'zh-TW',
         'region': 'tw',
         'key': GOOGLE_API_KEY
@@ -273,27 +269,22 @@ def search_places():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# 🚀 專門給前端呼叫的「智慧轉乘決策 API」
 @app.route("/api/recommend_transit", methods=["POST"])
 def recommend_transit():
     try:
         data = request.json or {}
-        
-        # 取得前端傳來的數據
         distance = data.get('distance', 0)
         pure_walk_time = data.get('pure_walk_time', 0)
         yb_data = data.get('yb_data', None)
         metro_data = data.get('metro_data', None)
 
-        # 呼叫核心大腦進行運算
         decision = calculate_best_transit_mode(distance, pure_walk_time, yb_data, metro_data)
-        
         return jsonify(decision)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    init_db()          
+    init_db()         
     load_metro_data()  
     sync_data_to_db()  
     
