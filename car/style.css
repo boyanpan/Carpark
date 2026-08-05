@@ -3,20 +3,8 @@ html, body { height: 100vh; width: 100vw; margin: 0; padding: 0; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .leaflet-routing-container { display: none !important; }
 
-/* 🌟 導航提示框動畫 (Uber 風格浮動面板) */
-#nav-header.active { 
-    transform: translateY(0) scale(1); 
-    opacity: 1;
-}
-#nav-header {
-    transform: translateY(-30px) scale(0.95);
-    opacity: 0;
-    pointer-events: none;
-    box-shadow: 0 20px 40px rgba(27, 42, 71, 0.3);
-}
-#nav-header.active {
-    pointer-events: auto;
-}
+/* 導航提示框動畫 */
+#nav-header.active { transform: translateY(0); }
 
 /* 彈窗 (Popup) 美化 - 溫馨手帳書頁風 */
 .leaflet-popup-content-wrapper { 
@@ -159,14 +147,4 @@ html, body { height: 100vh; width: 100vw; margin: 0; padding: 0; }
 @keyframes parkedBounce {
     0% { transform: translateY(0); }
     100% { transform: translateY(-6px); }
-}
-
-/* 🌟 確保搜尋框與下拉聯想選單永遠在畫面最上層 (Z-Index 最高) */
-#search-panel {
-    z-index: 6000 !important;
-}
-
-#autocomplete-list {
-    z-index: 7000 !important;
-    position: absolute !important;
 }
