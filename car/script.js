@@ -653,15 +653,19 @@ function selectCard(id, lat, lng) {
 }
 
 // ==========================================
-// 9. Uber 風格即時路徑導航引擎 (Google Directions API)
+// 9. Uber 風格即時路徑導航引擎 (強化防卡死與錯誤處理版)
 // ==========================================
 window.startNav = function(itemStr) {
     const item = JSON.parse(decodeURIComponent(itemStr));
-    if (!userLocation) return alert("等待 GPS 定位中，請確保已開啟定位權限！");
-    initCompass(); 
-    isNavigating = true; currentDestination = item;
+    if (!userLocation) {
+        alert("尚未取得您的即時 GPS 座標，請稍候或重新整理再試！");
+        return;
+    }
     
-    // 🌟 展開 Uber 風格浮動導航面板，並收起下方清單或搜尋欄
+    initCompass(); 
+    isNavigating = true; 
+    currentDestination = item;
+    
     const navHeader = document.getElementById('nav-header');
     if (navHeader) navHeader.classList.add('active');
     if(window.innerWidth < 768) {
@@ -676,14 +680,17 @@ window.startNav = function(itemStr) {
 function updateRoute() {
     if (!isNavigating || !userLocation || !currentDestination) return;
     
+    const navInstruction = document.getElementById('nav-instruction');
+    const navMetrics = document.getElementById('nav-metrics');
+
     const request = {
         origin: new google.maps.LatLng(userLocation[0], userLocation[1]),
         destination: new google.maps.LatLng(currentDestination.lat, currentDestination.lng),
-        travelMode: 'DRIVING'
+        travelMode: google.maps.TravelMode.DRIVING
     };
 
     directionsService.route(request, function(result, status) {
-        if (status == 'OK') {
+        if (status === 'OK') {
             directionsRenderer.setDirections(result);
             
             const route = result.routes[0].legs[0];
@@ -695,18 +702,19 @@ function updateRoute() {
             if (nextStep.instructions.includes('迴轉')) arrow = "↩️";
 
             const navArrow = document.getElementById('nav-arrow');
-            const navInstruction = document.getElementById('nav-instruction');
             if (navArrow) navArrow.innerText = arrow;
             
             const cleanInstruction = nextStep.instructions.replace(/<[^>]*>?/gm, '');
             if (navInstruction) navInstruction.innerText = `${nextStep.distance.text} 後，${cleanInstruction}`;
             
-            const navMetrics = document.getElementById('nav-metrics');
             if (navMetrics) navMetrics.innerText = `🏁 總剩餘 ${route.distance.text} | 預計 ${route.duration.text} 抵達`;
             
-            // 🌟 導航中讓地圖平滑跟隨車輛位置
             map.panTo({ lat: userLocation[0], lng: userLocation[1] });
             map.setZoom(18);
+        } else {
+            console.error("Google 導航路徑計算失敗，狀態碼:", status);
+            if (navInstruction) navInstruction.innerText = "無法規劃行車路徑 😢";
+            if (navMetrics) navMetrics.innerText = `錯誤代碼: ${status}`;
         }
     });
 }
