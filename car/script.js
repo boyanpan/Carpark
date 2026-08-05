@@ -98,7 +98,7 @@ function collapseBottomSheet() {
     }
 }
 
-let isDraggingSheet = false; // 新增：防止高頻觸發的鎖定閥
+let isDraggingSheet = false;
 
 if (dragHandle && bottomSheet) {
     dragHandle.addEventListener('touchstart', (e) => {
@@ -108,11 +108,9 @@ if (dragHandle && bottomSheet) {
     }, {passive: true});
 
     dragHandle.addEventListener('touchmove', (e) => {
-        // 如果正在渲染上一幀，就直接跳過，避免瀏覽器過載
         if (isDraggingSheet) return; 
         isDraggingSheet = true;
 
-        // 呼叫瀏覽器原生 API，確保在最佳時機 (60fps) 更新畫面
         requestAnimationFrame(() => {
             let newHeight = currentHeight + (startY - e.touches[0].clientY);
             const winH = window.innerHeight;
@@ -120,7 +118,7 @@ if (dragHandle && bottomSheet) {
             if (newHeight < winH * 0.20) newHeight = winH * 0.20; 
             
             bottomSheet.style.height = `${newHeight}px`;
-            isDraggingSheet = false; // 渲染完成，解鎖
+            isDraggingSheet = false; 
         });
     }, {passive: true});
 
@@ -227,6 +225,7 @@ function initGPS() {
             if (isNavigating) {
                 map.panTo({ lat: latitude, lng: longitude });
                 map.setZoom(18);
+                updateRoute(); // 🌟 導航中隨時動態更新路徑與距離
             }
         },
         (err) => { 
@@ -500,7 +499,6 @@ window.highlightCardInList = function(id) {
     }
 };
 
-// 用於連動開啟 Google Map Popup 視窗的共用函數
 function openMarkerPopup(item, marker) {
     const safeItemStr = encodeURIComponent(JSON.stringify(item));
     const buildRow = (icon, label, d) => {
@@ -543,7 +541,7 @@ function openMarkerPopup(item, marker) {
 }
 
 // ==========================================
-// 🛠️ 更新 1：更新地圖標記與 Popup 視窗 (Google Maps 版)
+// 7. 更新地圖標記與 Popup 視窗 (Google Maps 版)
 // ==========================================
 function renderMapMarkers(data) {
     if (markerCluster) markerCluster.clearMarkers();
@@ -584,7 +582,7 @@ function renderMapMarkers(data) {
 }
 
 // ==========================================
-// 🛠️ 更新 2：更新下方列表清單 (renderList)
+// 8. 更新下方列表清單 (renderList)
 // ==========================================
 function renderList(data, isUsingDest) {
     const listEl = document.getElementById('content-list');
@@ -636,7 +634,6 @@ function renderList(data, isUsingDest) {
     });
 }
 
-// 🌟 列表 ➡️ 地圖 的反向連動功能：點擊後地圖自動開 Popup
 function selectCard(id, lat, lng) {
     collapseBottomSheet();
     map.panTo({ lat: lat, lng: lng });
@@ -656,7 +653,7 @@ function selectCard(id, lat, lng) {
 }
 
 // ==========================================
-// 7. 即時路徑導航引擎 (Google Directions API)
+// 9. Uber 風格即時路徑導航引擎 (Google Directions API)
 // ==========================================
 window.startNav = function(itemStr) {
     const item = JSON.parse(decodeURIComponent(itemStr));
@@ -664,6 +661,7 @@ window.startNav = function(itemStr) {
     initCompass(); 
     isNavigating = true; currentDestination = item;
     
+    // 🌟 展開 Uber 風格浮動導航面板，並收起下方清單或搜尋欄
     const navHeader = document.getElementById('nav-header');
     if (navHeader) navHeader.classList.add('active');
     if(window.innerWidth < 768) {
@@ -671,7 +669,7 @@ window.startNav = function(itemStr) {
         if (bottomSheet) bottomSheet.style.transform = 'translateY(100%)';
     }
     
-    if (infoWindow) infoWindow.close(); // 關閉彈窗保持導航乾淨
+    if (infoWindow) infoWindow.close(); 
     updateRoute();
 }
 
@@ -700,13 +698,13 @@ function updateRoute() {
             const navInstruction = document.getElementById('nav-instruction');
             if (navArrow) navArrow.innerText = arrow;
             
-            // 過濾掉 Google 預設的 HTML 標籤
             const cleanInstruction = nextStep.instructions.replace(/<[^>]*>?/gm, '');
             if (navInstruction) navInstruction.innerText = `${nextStep.distance.text} 後，${cleanInstruction}`;
             
             const navMetrics = document.getElementById('nav-metrics');
-            if (navMetrics) navMetrics.innerText = `總剩餘 ${route.distance.text} | 約 ${route.duration.text} 抵達`;
+            if (navMetrics) navMetrics.innerText = `🏁 總剩餘 ${route.distance.text} | 預計 ${route.duration.text} 抵達`;
             
+            // 🌟 導航中讓地圖平滑跟隨車輛位置
             map.panTo({ lat: userLocation[0], lng: userLocation[1] });
             map.setZoom(18);
         }
@@ -734,7 +732,7 @@ window.stopNavigation = function() {
 }
 
 // ==========================================
-// 8. 分頁切換與最愛面板管理
+// 10. 分頁切換與最愛面板管理
 // ==========================================
 window.switchTab = function(tab) {
     currentTab = tab;
@@ -760,7 +758,7 @@ window.toggleFav = function(id) {
 }
 
 // ==========================================
-// 9. 下拉智慧聯想選單
+// 11. 下拉智慧聯想選單
 // ==========================================
 function initAutocomplete() {
     const searchInput = document.getElementById('searchInput');
@@ -876,7 +874,7 @@ function initAutocomplete() {
 }
 
 // ==========================================
-// 10. 建立搜尋地標與常駐標籤 (Google Maps 版)
+// 12. 建立搜尋地標與常駐標籤
 // ==========================================
 function createSearchMarker(name, lat, lng, address = "") {
     if (destMarker) destMarker.map = null;
@@ -913,7 +911,7 @@ function createSearchMarker(name, lat, lng, address = "") {
 }
 
 // ==========================================
-// 11. 智慧轉乘推薦 UI 引擎
+// 13. 智慧轉乘推薦 UI 引擎
 // ==========================================
 function buildSmartTransitBadge(item) {
     if (!item || !item.transit) return '';
@@ -943,19 +941,15 @@ function buildSmartTransitBadge(item) {
     `;
 }
 
-
 // ==========================================
-// 🎙️ 全自動免持語音控制系統 (Continuous Web Speech API)
+// 🎙️ 全自動免持語音控制系統
 // ==========================================
 let voiceRecognition;
 let isVoiceActive = false; 
 
 function initVoiceControl() {
     const SpeechRecognition = window.ShareSpeechRecognition || window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-        console.warn("此瀏覽器環境不支援 Web Speech API");
-        return;
-    }
+    if (!SpeechRecognition) return;
     
     voiceRecognition = new SpeechRecognition();
     voiceRecognition.continuous = true;       
@@ -974,8 +968,7 @@ function initVoiceControl() {
         if (isVoiceActive) {
             setTimeout(() => {
                 if (isVoiceActive) {
-                    try { voiceRecognition.start(); } 
-                    catch (e) { console.log("語音助手無縫重連監聽中...", e); }
+                    try { voiceRecognition.start(); } catch (e) {}
                 }
             }, 300);
         } else {
@@ -989,35 +982,16 @@ function initVoiceControl() {
 
     voiceRecognition.onresult = (event) => {
         const currentResultIndex = event.resultIndex;
-        const isFinal = event.results[currentResultIndex].isFinal;
-        
-        if (isFinal) {
-            let resultText = event.results[currentResultIndex][0].transcript.trim();
-            resultText = resultText.replace(/[。？，！]/g, ""); 
-            
-            if (resultText) {
-                handleVoiceCommand(resultText);
-            }
-        }
-    };
-
-    voiceRecognition.onerror = (event) => {
-        console.error("語音監聽異常:", event.error);
-        if (event.error === 'not-allowed') {
-            alert("請允許網頁存取您的麥克風權限，才能開啟免持語音操作功能喔！");
-            isVoiceActive = false;
+        if (event.results[currentResultIndex].isFinal) {
+            let resultText = event.results[currentResultIndex][0].transcript.trim().replace(/[。？，！]/g, ""); 
+            if (resultText) handleVoiceCommand(resultText);
         }
     };
 }
 
 window.toggleContinuousVoice = function() {
     if (!voiceRecognition) initVoiceControl();
-    
-    if (!voiceRecognition) {
-        alert("此瀏覽器不支援語音辨識（建議使用桌面版 Chrome 或 iOS Safari 行動版）");
-        return;
-    }
-
+    if (!voiceRecognition) { alert("此瀏覽器不支援語音辨識"); return; }
     if (isVoiceActive) {
         isVoiceActive = false;
         voiceRecognition.stop(); 
@@ -1028,57 +1002,32 @@ window.toggleContinuousVoice = function() {
 };
 
 function handleVoiceCommand(cmd) {
-    console.log("【免持助理聽到語音】: ", cmd);
-
-    if (cmd.includes("重新定位") || cmd.includes("清除搜尋") || cmd.includes("定位")) {
-        if (typeof clearSearchAndLocate === "function") clearSearchAndLocate();
-        return;
-    }
-    if (cmd.includes("我的收藏") || cmd.includes("收藏")) {
-        if (typeof switchTab === "function") switchTab('fav');
-        return;
-    }
-    if (cmd.includes("附近推薦") || cmd.includes("推薦") || cmd.includes("附近")) {
-        if (typeof switchTab === "function") switchTab('search');
-        return;
-    }
-    if (cmd.includes("結束導航") || cmd.includes("停止導航") || cmd.includes("關閉導航")) {
-        if (typeof stopNavigation === "function") stopNavigation();
-        return;
-    }
+    if (cmd.includes("重新定位") || cmd.includes("清除搜尋") || cmd.includes("定位")) { clearSearchAndLocate(); return; }
+    if (cmd.includes("我的收藏") || cmd.includes("收藏")) { switchTab('fav'); return; }
+    if (cmd.includes("附近推薦") || cmd.includes("推薦") || cmd.includes("附近")) { switchTab('search'); return; }
+    if (cmd.includes("結束導航") || cmd.includes("停止導航") || cmd.includes("關閉導航")) { stopNavigation(); return; }
 
     let searchKeyword = cmd;
     if (cmd.startsWith("搜尋") || cmd.startsWith("尋找") || cmd.startsWith("我要找") || cmd.startsWith("幫我找")) {
         searchKeyword = cmd.replace(/^(搜尋|尋找|我要找|幫我找)/, "").trim();
     }
-    
     if (searchKeyword) {
-        executeVoiceSearch(searchKeyword);
-    }
-}
-
-function executeVoiceSearch(keyword) {
-    const inputEl = document.getElementById('searchInput');
-    if (inputEl && typeof searchLocation === "function") {
-        inputEl.value = keyword; 
-        searchLocation();        
+        const inputEl = document.getElementById('searchInput');
+        if (inputEl) { inputEl.value = searchKeyword; searchLocation(); }
     }
 }
 
 // ==========================================
-// 🚗 [特色 3] 我停好了！尋車與計時防收費小幫手邏輯 (Google Maps 版)
+// 🚗 愛車尋車與計時防收費小幫手邏輯
 // ==========================================
 let parkedMarker = null;
 let parkedInterval = null;
 
 window.toggleParkedStatus = function() {
     const targetPos = userLocation || (map ? [map.getCenter().lat(), map.getCenter().lng()] : null);
-    if (!targetPos) {
-        alert("目前無法取得定位，請稍後再試！");
-        return;
-    }
+    if (!targetPos) { alert("目前無法取得定位！"); return; }
 
-    const rateInput = prompt("請輸入此停車場的每小時費率（純數字，例如: 40，不計費請填0）：", "40");
+    const rateInput = prompt("請輸入每小時費率（例如: 40，不計費請填0）：", "40");
     const hourlyRate = parseInt(rateInput, 10) || 0;
 
     localStorage.setItem('p_parked_lat', targetPos[0]);
@@ -1087,7 +1036,7 @@ window.toggleParkedStatus = function() {
     localStorage.setItem('p_parked_rate', hourlyRate);
 
     startParkedTimerLoop();
-    alert("🚗 愛車位置已順利紀錄！已為您啟動防收費計時手帳。");
+    alert("🚗 愛車位置已順利紀錄！");
 };
 
 function startParkedTimerLoop() {
@@ -1113,35 +1062,15 @@ function startParkedTimerLoop() {
         position: { lat: parseFloat(lat), lng: parseFloat(lng) },
         content: parkedIconContent
     });
-    
-    const parkedInfo = new google.maps.InfoWindow({
-        content: `
-            <div class="p-2 text-center text-xs font-serif font-bold bg-[#fffdfb]">
-                🔑 我的愛車停在這裡！<br>
-                <span class="text-[10px] text-stone-500 font-sans font-medium">記錄時間: ${new Date(parseInt(startTime)).toLocaleTimeString()}</span>
-            </div>
-        `
-    });
-    
-    parkedMarker.addListener('click', () => parkedInfo.open(map, parkedMarker));
 
     const updateDisplay = () => {
-        const now = Date.now();
-        const diffMs = now - parseInt(startTime);
-        const diffMins = Math.max(1, Math.floor(diffMs / 1000 / 60)); 
-        
+        const diffMins = Math.max(1, Math.floor((Date.now() - parseInt(startTime)) / 1000 / 60)); 
         let timeStr = `${diffMins} 分鐘`;
         if (diffMins >= 60) {
-            const hrs = Math.floor(diffMins / 60);
-            const mins = diffMins % 60;
-            timeStr = `${hrs} 小時 ${mins} 分`;
+            timeStr = `${Math.floor(diffMins / 60)} 小時 ${diffMins % 60} 分`;
         }
-        
-        const hoursBilled = Math.ceil(diffMins / 60);
-        const totalCost = hoursBilled * hourlyRate;
-
         document.getElementById('parkedTimeDisplay').innerText = timeStr;
-        document.getElementById('parkedCostDisplay').innerText = `$${totalCost} 元`;
+        document.getElementById('parkedCostDisplay').innerText = `$${Math.ceil(diffMins / 60) * hourlyRate} 元`;
     };
 
     updateDisplay();
@@ -1150,8 +1079,7 @@ function startParkedTimerLoop() {
 }
 
 window.clearParkedStatus = function() {
-    if (!confirm("確定要結算並清除這次的停車紀錄手帳嗎？")) return;
-    
+    if (!confirm("確定要清除停車紀錄嗎？")) return;
     if (parkedInterval) clearInterval(parkedInterval);
     if (parkedMarker) parkedMarker.map = null;
     parkedMarker = null;
@@ -1171,19 +1099,9 @@ window.navToMyCar = function() {
     const lat = localStorage.getItem('p_parked_lat');
     const lng = localStorage.getItem('p_parked_lng');
     if (!lat || !lng) return;
-
-    const fakeCarItem = {
-        name: "我的愛車 🚗",
-        lat: parseFloat(lat),
-        lng: parseFloat(lng)
-    };
-    
-    const safeItemStr = encodeURIComponent(JSON.stringify(fakeCarItem));
-    startNav(safeItemStr); 
+    startNav(encodeURIComponent(JSON.stringify({ name: "我的愛車 🚗", lat: parseFloat(lat), lng: parseFloat(lng) }))); 
 };
 
 function checkSavedParkedStatus() {
-    if (localStorage.getItem('p_parked_lat')) {
-        startParkedTimerLoop();
-    }
+    if (localStorage.getItem('p_parked_lat')) startParkedTimerLoop();
 }
