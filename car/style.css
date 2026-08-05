@@ -160,3 +160,13 @@ html, body { height: 100vh; width: 100vw; margin: 0; padding: 0; }
     0% { transform: translateY(0); }
     100% { transform: translateY(-6px); }
 }
+
+/* 🌟 確保搜尋框與下拉聯想選單永遠在畫面最上層 (Z-Index 最高) */
+#search-panel {
+    z-index: 6000 !important;
+}
+
+#autocomplete-list {
+    z-index: 7000 !important;
+    position: absolute !important;
+}
