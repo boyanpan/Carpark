@@ -283,16 +283,24 @@ def recommend_transit():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-if __name__ == "__main__":
-    init_db()         
-    load_metro_data()  
-    sync_data_to_db()  
-    
-    scheduler = BackgroundScheduler(daemon=True)
-    scheduler.add_job(func=sync_data_to_db, trigger='interval', minutes=3)
-    scheduler.start()
-    print("[INFO] ⏱️ 背景自動更新排程已啟動 (每 3 分鐘)")
 
+# =========================================================
+# 🚀 伺服器啟動與背景排程 (已修復 Render Gunicorn 不會觸發排程的陷阱)
+# =========================================================
+
+# 1. 移出 if __name__ == "__main__": 區塊外，確保 Render 載入檔案時直接執行
+init_db()         
+load_metro_data()  
+sync_data_to_db()  
+
+# 2. 啟動背景排程 (每 3 分鐘自動執行)
+scheduler = BackgroundScheduler(daemon=True)
+scheduler.add_job(func=sync_data_to_db, trigger='interval', minutes=3)
+scheduler.start()
+print("[INFO] ⏱️ 背景自動更新排程已啟動 (每 3 分鐘)")
+
+# 3. 本地端開發測試用的啟動入口
+if __name__ == "__main__":
     try:
         app.run(host='0.0.0.0', port=5000, debug=False) 
     except (KeyboardInterrupt, SystemExit):

@@ -72,6 +72,13 @@ function initGoogleMap() {
     initAutocomplete();
     fetchTaipeiParkingData();
     setTimeout(checkSavedParkedStatus, 1000);
+
+    // 🌟 核心修復：新增這段前端自動輪詢 (Auto-Polling) 機制
+    // 每 3 分鐘 (180000 毫秒)，前端會「背景無感」地自動向後端索取最新車位資料
+    setInterval(() => {
+        console.log("⏱️ 3分鐘到了！前端自動刷新即時車位資料...");
+        fetchTaipeiParkingData();
+    }, 180000);
 }
 
 // ==========================================
@@ -271,7 +278,10 @@ function smartMatch(targetStr, queryStr) {
 async function fetchTaipeiParkingData() {
     try {
         const listEl = document.getElementById('content-list');
-        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">📡 正在從雲端讀取即時車位...</div>`;
+        // 只有在資料還是空的時候才顯示載入中動畫，避免每3分鐘刷新時畫面閃爍
+        if (listEl && parkingData.length === 0) {
+            listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">📡 正在從雲端讀取即時車位...</div>`;
+        }
         
         let fetchUrl = `${API_BASE_URL}/nearby`;
         if (searchedLocation && searchedLocation.length === 2) {
