@@ -7,7 +7,7 @@
     
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <!-- 🌟 替換為 Google Maps API (請務必將 YOUR_API_KEY 換成你申請的金鑰) -->
+    <!-- 🌟 Google Maps API -->
     <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDCNjrUE7UN9GPqdnVg6ubx13FGQHLHei4&libraries=places,marker,geometry&v=weekly"></script>
     <!-- 🌟 Google Maps 官方 MarkerClusterer 叢集套件 -->
     <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
@@ -17,6 +17,7 @@
 </head>
 <body class="bg-[#faf6f0] overflow-hidden relative touch-none md:touch-auto font-sans text-stone-800">
 
+    <!-- Uber 風格沈浸式導航面板 -->
     <div id="nav-header" class="fixed top-0 left-0 right-0 z-[4000] bg-[#1b2a47] text-[#fdfbf7] p-3 shadow-2xl flex flex-col gap-2 transition-transform duration-300 transform -translate-y-full rounded-b-2xl border-b border-[#c5b49e]/30">
         <div class="flex items-center gap-3">
             <div class="w-12 h-12 flex items-center justify-center bg-white/10 rounded-2xl border border-white/20 shadow-inner shrink-0">
@@ -47,7 +48,7 @@
                         <div class="relative flex-1">
                             <input type="text" id="searchInput" autocomplete="off" onkeydown="if(event.key === 'Enter') searchLocation()" placeholder="搜尋停車場、超商或地點..." 
                                    class="w-full p-2.5 bg-[#fbf9f6] border border-[#e6dfd5] rounded-xl text-sm outline-none focus:border-[#1b2a47] focus:bg-white text-stone-800 transition shadow-inner placeholder-stone-400">
-                            <div id="autocomplete-list" class="absolute left-0 right-0 top-full mt-1 bg-white border border-[#e6dfd5] rounded-xl shadow-2xl hidden max-h-[40vh] overflow-y-auto z-[5000]">
+                            <div id="autocomplete-list" class="absolute left-0 right-0 top-full mt-1 bg-white border border-[#e6dfd5] rounded-xl shadow-2xl hidden max-h-[40vh] overflow-y-auto z-[7000]">
                             </div>
                         </div>
                         <button onclick="searchLocation()" class="bg-blue-600 text-white px-4 rounded-lg shadow-sm active:bg-blue-800 text-sm font-bold transition shrink-0">搜尋</button>
@@ -111,12 +112,14 @@
         </div>
     </div>
     
+    <!-- 地圖容器 -->
     <div id="map" class="absolute top-0 left-0 w-full h-full z-[1000]"></div>
-    <!-- 🌟 新增：回到我的定位懸浮按鈕 -->
-<button onclick="panToUserLocation()" id="recenter-btn" title="回到我的定位" 
-    class="fixed right-5 bottom-8 z-[3000] bg-white hover:bg-slate-50 text-stone-700 w-12 h-12 rounded-full shadow-lg border border-stone-200 flex items-center justify-center text-xl active:scale-90 transition-all cursor-pointer">
-    🎯
-</button>
+
+    <!-- 🌟 回到我的定位按鈕 (帶有高層級 z-index 確保一定看得見) -->
+    <button onclick="panToUserLocation()" id="recenter-btn" title="回到我的定位" 
+        class="fixed right-5 bottom-8 z-[3000] bg-white hover:bg-slate-50 text-stone-700 w-12 h-12 rounded-full shadow-2xl border border-stone-200 flex items-center justify-center text-xl active:scale-90 transition-all cursor-pointer">
+        🎯
+    </button>
     
     <script src="script.js"></script>
 </body>
