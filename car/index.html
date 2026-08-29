@@ -112,6 +112,11 @@
     </div>
     
     <div id="map" class="absolute top-0 left-0 w-full h-full z-[1000]"></div>
+    <!-- 🌟 新增：回到我的定位懸浮按鈕 -->
+<button onclick="panToUserLocation()" id="recenter-btn" title="回到我的定位" 
+    class="fixed right-5 bottom-8 z-[3000] bg-white hover:bg-slate-50 text-stone-700 w-12 h-12 rounded-full shadow-lg border border-stone-200 flex items-center justify-center text-xl active:scale-90 transition-all cursor-pointer">
+    🎯
+</button>
     
     <script src="script.js"></script>
 </body>

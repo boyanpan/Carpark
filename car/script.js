@@ -1024,3 +1024,19 @@ window.navToMyCar = function() {
 function checkSavedParkedStatus() {
     if (localStorage.getItem('p_parked_lat')) startParkedTimerLoop();
 }
+
+// ==========================================
+// 🌟 點擊按鈕瞬間回到使用者目前 GPS 定位
+// ==========================================
+window.panToUserLocation = function() {
+    if (!userLocation) {
+        alert("目前尚未取得您的 GPS 定位，請稍候再試！");
+        return;
+    }
+    
+    // 平滑移動地圖中心至使用者座標，並適度放大
+    map.panTo({ lat: userLocation[0], lng: userLocation[1] });
+    map.setZoom(17);
+    
+    console.log("📍 視角已手動回正至使用者座標:", userLocation);
+};
