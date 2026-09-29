@@ -1042,7 +1042,7 @@ window.panToUserLocation = function() {
 };
 
 // ==========================================
-// 🌟 詢問後端 AI 模型是否會客滿 (全新修改版)
+// 🌟 詢問後端 AI 模型是否會客滿 (真實環境抓取版)
 // ==========================================
 async function checkAIPrediction(targetTotalSpaces, currentCars, etaMinutes) {
     try {
@@ -1058,33 +1058,36 @@ async function checkAIPrediction(targetTotalSpaces, currentCars, etaMinutes) {
         
         const data = await response.json();
         
-        // 如果 AI 預測會客滿，且有回傳推薦備案
-        if (data.will_be_full && data.recommendation) {
-            // 填入推薦停車場資訊
-            document.getElementById('alt-name').innerText = data.recommendation.name;
-            document.getElementById('alt-info').innerText = `${data.recommendation.reason} | ${data.recommendation.rate}`;
+        // 如果 AI 預測會客滿
+        if (data.will_be_full) {
             
-            // 觸發動畫，滑出面板
-            document.getElementById('ai-recommendation-panel').classList.remove('hidden');
+            // 🌟 從目前 GPS 附近的真實停車場中，找尋備案
+            // 條件：找一個剩餘車位(car.a)大於 5 的停車場
+            // (因為 parkingData 已經依距離排好序，找到的第一個就是最近的！)
+            const realAlternative = parkingData.find(p => p.car.a > 5);
             
-            // 綁定「一鍵切換」按鈕的事件
-            document.getElementById('switch-route-btn').onclick = () => {
-                // 1. 點擊後收合面板
-                document.getElementById('ai-recommendation-panel').classList.add('hidden');
+            if (realAlternative) {
+                // 填入「真實」推薦停車場名稱與資訊
+                document.getElementById('alt-name').innerText = "推薦：" + realAlternative.name;
+                const distMeter = realAlternative.distance ? (realAlternative.distance * 1000).toFixed(0) : 0;
+                document.getElementById('alt-info').innerText = `距離約 ${distMeter} 公尺 | 費率: ${realAlternative.payex} | 剩餘車位: ${realAlternative.car.a}`;
                 
-                // 2. 打包 AI 推薦的新停車場資料
-                const newDestination = {
-                    name: "推薦：" + data.recommendation.name,
-                    lat: data.recommendation.lat,
-                    lng: data.recommendation.lng
+                // 觸發動畫，滑出面板
+                document.getElementById('ai-recommendation-panel').classList.remove('hidden');
+                
+                // 綁定「一鍵切換」按鈕的事件
+                document.getElementById('switch-route-btn').onclick = () => {
+                    document.getElementById('ai-recommendation-panel').classList.add('hidden');
+                    
+                    // 呼叫你的神級導航，傳入真實停車場資料
+                    const safeItemStr = encodeURIComponent(JSON.stringify(realAlternative));
+                    startNav(safeItemStr);
                 };
-                
-                // 3. 呼叫你原本寫好的神級導航函數 startNav，並傳入轉碼後的資料
-                const safeItemStr = encodeURIComponent(JSON.stringify(newDestination));
-                startNav(safeItemStr);
-            };
+            } else {
+                console.log("⚠️ 完蛋，方圓百里全滿了！"); 
+            }
         } else {
-            console.log(data.msg); // AI 預測車位充足
+            console.log("✨ AI 預測車位充足，請安心前往！"); 
         }
     } catch (error) {
         console.error("AI 預測請求失敗:", error);
