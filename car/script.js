@@ -1040,3 +1040,43 @@ window.panToUserLocation = function() {
     
     console.log("📍 視角已手動回正至使用者座標:", userLocation);
 };
+
+// 詢問後端 AI 模型是否會客滿
+async function checkAIPrediction(targetTotalSpaces, currentCars, etaMinutes) {
+    try {
+        const response = await fetch('/api/predict_and_recommend', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                total_spaces: targetTotalSpaces,
+                current_cars: currentCars,
+                eta_minutes: etaMinutes
+            })
+        });
+        
+        const data = await response.json();
+        
+        // 如果 AI 預測會客滿，且有回傳推薦備案
+        if (data.will_be_full && data.recommendation) {
+            // 填入推薦停車場資訊
+            document.getElementById('alt-name').innerText = data.recommendation.name;
+            document.getElementById('alt-info').innerText = `${data.recommendation.reason} | ${data.recommendation.rate}`;
+            
+            // 觸發動畫，滑出面板
+            document.getElementById('ai-recommendation-panel').classList.remove('hidden');
+            
+            // 綁定「一鍵切換」按鈕的事件
+            document.getElementById('switch-route-btn').onclick = () => {
+                alert(`已將導航目的地變更為：${data.recommendation.name}`);
+                // 這裡未來可以接上你原本的 Leaflet Routing Machine 重新計算路徑的功能
+                
+                // 點擊後收合面板
+                document.getElementById('ai-recommendation-panel').classList.add('hidden');
+            };
+        } else {
+            console.log(data.msg); // AI 預測車位充足
+        }
+    } catch (error) {
+        console.error("AI 預測請求失敗:", error);
+    }
+}

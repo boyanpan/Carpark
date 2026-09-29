@@ -168,3 +168,68 @@ html, body { height: 100vh; width: 100vw; margin: 0; padding: 0; }
     background-color: #f8fafc;
     transform: scale(1.05);
 }
+/* AI 推薦面板樣式 */
+#ai-recommendation-panel {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+    z-index: 9999;
+    width: 90%;
+    max-width: 400px;
+    overflow: hidden;
+    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+#ai-recommendation-panel.hidden {
+    top: -200px; /* 隱藏在畫面頂部外 */
+    opacity: 0;
+}
+
+.ai-warning-header {
+    background: #ff4757;
+    color: white;
+    padding: 12px 15px;
+    font-weight: bold;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+}
+
+.ai-recommendation-body {
+    padding: 15px;
+    text-align: left;
+}
+
+.ai-recommendation-body h4 {
+    margin: 10px 0 5px 0;
+    color: #2f3542;
+    font-size: 18px;
+}
+
+.ai-recommendation-body p {
+    margin: 0;
+    color: #747d8c;
+    font-size: 14px;
+}
+
+#switch-route-btn {
+    width: 100%;
+    padding: 12px;
+    background: #2ed573;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    margin-top: 15px;
+    transition: background 0.2s;
+}
+
+#switch-route-btn:active {
+    background: #27ae60;
+}

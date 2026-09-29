@@ -120,6 +120,17 @@
         class="fixed right-5 bottom-8 z-[3000] bg-white hover:bg-slate-50 text-stone-700 w-12 h-12 rounded-full shadow-2xl border border-stone-200 flex items-center justify-center text-xl active:scale-90 transition-all cursor-pointer">
         🎯
     </button>
+
+    <!-- AI 預測與推薦面板 -->
+    <div id="ai-recommendation-panel" class="hidden">
+        <div class="ai-warning-header">⚠️ AI 預測：抵達時車位極可能客滿！</div>
+        <div class="ai-recommendation-body">
+            <p>為您尋找最佳替代方案：</p>
+            <h4 id="alt-name">推薦停車場名稱</h4>
+            <p id="alt-info">距離 / 費率 / 剩餘車位</p>
+            <button id="switch-route-btn">一鍵切換導航路線</button>
+        </div>
+    </div>
     
     <script src="script.js"></script>
 </body>

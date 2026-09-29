@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 from typing import Any, Dict, List, Optional
+import joblib
+import datetime
 import math
 import json
 import random
@@ -20,6 +22,13 @@ load_dotenv()
 
 # ⚙️ 初始化 Flask
 app = Flask(__name__, static_folder='car', static_url_path='/')
+# 載入 AI 預測模型
+try:
+    ai_model = joblib.load('parking_model.pkl')
+    print("🧠 AI 動態預測大腦載入成功！")
+except Exception as e:
+    ai_model = None
+    print(f"⚠️ AI 模型載入失敗: {e}")
 
 # 🎯 解放 CORS：允許前端跨網域索取資料
 CORS(app, resources={
@@ -282,6 +291,50 @@ def recommend_transit():
         return jsonify(decision)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/predict_and_recommend', methods=['POST'])
+def predict_and_recommend():
+    if not ai_model:
+        return jsonify({"error": "AI 模型未載入"}), 500
+        
+    data = request.json
+    # 接收前端傳來的目標停車場數據
+    total_spaces = data.get('total_spaces', 50)
+    current_cars = data.get('current_cars', 40)
+    eta_minutes = data.get('eta_minutes', 15) # 預計幾分鐘後抵達
+    
+    # 計算抵達時的「未來時間」
+    future_time = datetime.datetime.now() + datetime.timedelta(minutes=eta_minutes)
+    hour = future_time.hour
+    day_of_week = future_time.weekday()
+    
+    # 1. 讓 AI 大腦進行預測
+    # 特徵順序必須與訓練時一致：['Hour', 'DayOfWeek', 'TotalSpaces', 'CurrentCars']
+    prediction = ai_model.predict([[hour, day_of_week, total_spaces, current_cars]])[0]
+    
+    if prediction == 0:
+        return jsonify({
+            "will_be_full": False, 
+            "msg": "✨ AI 預測：抵達時車位充足，請安心前往！"
+        })
+        
+    # 2. 如果預測會客滿，觸發「推薦替代方案」邏輯
+    # (實務上這裡可以寫一小段邏輯，從你的資料庫篩選附近空位最多的停車場)
+    # 這裡先假定系統為使用者找到了一個最佳備案：
+    alternative_lot = {
+        "name": "附近備用室內停車場",
+        "lat": 25.0339, 
+        "lng": 121.5644,
+        "available_spaces": 12,
+        "rate": "40元/小時",
+        "reason": "距離原目的地僅 300 公尺，且目前空位率高"
+    }
+    
+    return jsonify({
+        "will_be_full": True,
+        "msg": "⚠️ AI 預測：抵達時該停車場極可能客滿！",
+        "recommendation": alternative_lot
+    })
 
 
 # =========================================================
