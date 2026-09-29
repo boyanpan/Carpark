@@ -716,7 +716,7 @@ window.startNav = function(itemStr) {
     
     if (infoWindow) infoWindow.close();
 
-    // 1️⃣ 第一步：先透過 Google Directions 規劃路線並「顯示全覽路線」[cite: 7]
+    // 1️⃣ 第一步：先透過 Google Directions 規劃路線並「顯示全覽路線」
     const request = {
         origin: new google.maps.LatLng(userLocation[0], userLocation[1]),
         destination: new google.maps.LatLng(item.lat, item.lng),
@@ -745,13 +745,13 @@ window.startNav = function(itemStr) {
             if (navInstruction) navInstruction.innerText = `${nextStep.distance.text} 後，${cleanInstruction}`;
             if (navMetrics) navMetrics.innerText = `🏁 總剩餘 ${route.distance.text} | 約 ${route.duration.text} 抵達`;
             
-            // 🌟 讓地圖自動包圍整條路線（顯示全覽路線）[cite: 7]
+            // 🌟 讓地圖自動包圍整條路線（顯示全覽路線）
             const bounds = new google.maps.LatLngBounds();
             bounds.extend(new google.maps.LatLng(userLocation[0], userLocation[1]));
             bounds.extend(new google.maps.LatLng(item.lat, item.lng));
             map.fitBounds(bounds);
 
-            // 2️⃣ 第二步：等待 2.5 秒讓使用者看完全覽路線後，自動放大 (Zoom 18) 至目前位置開始跟隨導航[cite: 7]
+            // 2️⃣ 第二步：等待 2.5 秒讓使用者看完全覽路線後，自動放大 (Zoom 18) 至目前位置開始跟隨導航
             setTimeout(() => {
                 if (isNavigating) {
                     map.panTo({ lat: userLocation[0], lng: userLocation[1] });
@@ -1041,7 +1041,9 @@ window.panToUserLocation = function() {
     console.log("📍 視角已手動回正至使用者座標:", userLocation);
 };
 
-// 詢問後端 AI 模型是否會客滿
+// ==========================================
+// 🌟 詢問後端 AI 模型是否會客滿 (全新修改版)
+// ==========================================
 async function checkAIPrediction(targetTotalSpaces, currentCars, etaMinutes) {
     try {
         const response = await fetch('/api/predict_and_recommend', {
@@ -1067,11 +1069,19 @@ async function checkAIPrediction(targetTotalSpaces, currentCars, etaMinutes) {
             
             // 綁定「一鍵切換」按鈕的事件
             document.getElementById('switch-route-btn').onclick = () => {
-                alert(`已將導航目的地變更為：${data.recommendation.name}`);
-                // 這裡未來可以接上你原本的 Leaflet Routing Machine 重新計算路徑的功能
-                
-                // 點擊後收合面板
+                // 1. 點擊後收合面板
                 document.getElementById('ai-recommendation-panel').classList.add('hidden');
+                
+                // 2. 打包 AI 推薦的新停車場資料
+                const newDestination = {
+                    name: "推薦：" + data.recommendation.name,
+                    lat: data.recommendation.lat,
+                    lng: data.recommendation.lng
+                };
+                
+                // 3. 呼叫你原本寫好的神級導航函數 startNav，並傳入轉碼後的資料
+                const safeItemStr = encodeURIComponent(JSON.stringify(newDestination));
+                startNav(safeItemStr);
             };
         } else {
             console.log(data.msg); // AI 預測車位充足
