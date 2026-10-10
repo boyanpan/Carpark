@@ -342,33 +342,18 @@ def handle_location(event):
 def handle_message(event):
     user_text = event.message.text.strip()
     
-    # 🟢 按鈕 B：空位推薦 (同時支援「推薦」或「排行」)
-    if "推薦" in user_text or "排行" in user_text:
-        try:
-            conn = get_db_connection()
-            cursor = conn.cursor(dictionary=True)
-            cursor.execute("""
-                SELECT name, address, available_car, total_car, payex 
-                FROM parking_lots WHERE available_car > 0 
-                ORDER BY available_car DESC LIMIT 3
-            """)
-            lots = cursor.fetchall()
-            cursor.close()
-            conn.close()
-
-            if lots:
-                reply_msg = "🏆 為您推薦目前空位最多的停車場：\n\n"
-                for lot in lots:
-                    reply_msg += f"🅿️ 【{lot['name']}】\n"
-                    reply_msg += f"📍 位置：{lot['address']}\n"
-                    reply_msg += f"🚗 空位：{lot['available_car']} / {lot['total_car']}\n"
-                    reply_msg += f"💰 費率：{lot['payex']}\n"
-                    reply_msg += "-" * 15 + "\n"
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
-            else:
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="😢 目前暫無空位資料。"))
-        except Exception as e:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 資料庫查詢錯誤，請稍後再試！"))
+    # 🟢 按鈕 B：目的地尋車 (取代原本無用的空位排名)
+    if "推薦" in user_text or "尋車" in user_text or "地標" in user_text:
+        reply_msg = (
+            "📍 【目的地精準尋車】\n\n"
+            "想知道要去的地方附近有沒有車位嗎？\n"
+            "請直接在聊天室輸入「找 ＋ 地點」！\n\n"
+            "💡 測試範例：\n"
+            "👉 找 台北101\n"
+            "👉 找 新莊體育館\n\n"
+            "系統會結合 Google 地圖與即時車況，為您算出距離最近的空車位喔！"
+        )
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
             
     # 🟢 按鈕 C：附近車位 (同時支援「附近」或「適地」)
     elif "附近" in user_text or "適地" in user_text:
