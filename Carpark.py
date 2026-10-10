@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
+import os
 import joblib
 import datetime
 import math
@@ -9,7 +9,7 @@ import random
 import requests
 import pandas as pd
 import mysql.connector
-import os
+import google.generativeai as genai  # 🌟 新增 Gemini AI 套件
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -17,10 +17,10 @@ from pyproj import Transformer
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 
-# 🟢 引入 LINE Bot 所需套件 (已包含 LocationMessage)
+# 🟢 引入 LINE Bot 所需套件
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, TextSendMessage, TemplateSendMessage, ButtonsTemplate, URITemplateAction, LocationMessage
+from linebot.models import MessageEvent, TextMessage, TextSendMessage, LocationMessage
 
 # ⚙️ 載入環境變數
 load_dotenv()
@@ -31,6 +31,17 @@ app = Flask(__name__, static_folder='car', static_url_path='/')
 # 🟢 初始化 LINE Bot API 與 Handler
 line_bot_api = LineBotApi(os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', ''))
 handler = WebhookHandler(os.environ.get('LINE_CHANNEL_SECRET', ''))
+
+# 🌟 初始化 Gemini AI 模型
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    ai_generation_config = {"temperature": 0.7}
+    gemini_model = genai.GenerativeModel('gemini-1.5-flash', generation_config=ai_generation_config)
+    print("🤖 Gemini AI 助理大腦載入成功！")
+else:
+    gemini_model = None
+    print("⚠️ 尚未設定 GEMINI_API_KEY，AI 對話功能將不會啟用。")
 
 # 載入 AI 預測模型
 try:
@@ -298,7 +309,45 @@ def callback():
         return 'Invalid signature', 400
     return 'OK'
 
-# 💬 處理使用者傳送的文字 (對應圖文選單的按鈕)
+# 📍 處理使用者傳送的 GPS 定位 (保留給原生 LINE 傳送位置使用)
+@handler.add(MessageEvent, message=LocationMessage)
+def handle_location(event):
+    user_lat = event.message.latitude
+    user_lng = event.message.longitude
+    
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        sql = f"""
+            SELECT name, address, available_car, total_car, payex,
+            (POW(lat - {user_lat}, 2) + POW(lng - {user_lng}, 2)) as distance 
+            FROM parking_lots 
+            WHERE available_car > 0 
+            ORDER BY distance ASC 
+            LIMIT 3
+        """
+        cursor.execute(sql)
+        lots = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        if lots:
+            reply_msg = "📍 根據您的位置，最近的空車位推薦：\n\n"
+            for lot in lots:
+                reply_msg += f"🅿️ 【{lot['name']}】\n"
+                reply_msg += f"🚗 空位：{lot['available_car']} / {lot['total_car']}\n"
+                reply_msg += f"💰 費率：{lot['payex']}\n"
+                reply_msg += "-" * 15 + "\n"
+            reply_msg += "💡 點擊選單【開啟地圖】按鈕即可直接導航！"
+        else:
+            reply_msg = "😢 附近暫無空位資料。"
+
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
+    except Exception as e:
+        print(f"[ERROR] 定位搜尋失敗: {e}")
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 搜尋發生錯誤，請稍後再試。"))
+
+# 💬 處理使用者傳送的文字 (對應圖文選單的按鈕 & 雙引擎搜尋)
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_text = event.message.text.strip()
@@ -388,25 +437,26 @@ def handle_message(event):
         reply_msg = (
             "👋 歡迎使用【智慧停車地圖系統】！\n\n"
             "我們的網頁地圖搭載了最先進的技術，功能指南如下：\n\n"
-            "1️⃣ AI 預測與備案 🔮：點擊地圖「🅿️」開始導航，AI 將預測抵達時是否客滿，若客滿會自動彈出最近的備用車位供您「一鍵切換路線」！\n"
+            "1️⃣ AI 預測與備案 🔮：點擊地圖「🅿️」開始導航，AI 將預測抵達時是否客滿，若客滿會自動彈出備用車位！\n"
             "2️⃣ 語音聲控助理 🎙️：點選地圖麥克風，直接說「找 台北車站」免動手！\n"
-            "3️⃣ 計時尋車防超收 🚙：停好車後點擊紀錄位置，系統會即時幫您精算停車費，並支援一鍵導航回愛車身邊。\n"
-            "4️⃣ 智慧轉乘決策 🚲：停好車還要走很遠？系統會依據距離自動精算 YouBike 或捷運的最快轉乘方案。\n"
-            "5️⃣ 條件智慧篩選 🎯：透過底部抽屜選單，可隨時切換「距離最近」或「費率最便宜」來排序。\n\n"
+            "3️⃣ 計時尋車防超收 🚙：紀錄位置並精算停車費，支援一鍵導航回愛車身邊。\n"
+            "4️⃣ 智慧轉乘決策 🚲：自動精算 YouBike 或捷運的最快轉乘方案。\n"
+            "5️⃣ 條件智慧篩選 🎯：透過底部抽屜選單，可切換「距離最近」或「費率最便宜」。\n\n"
             "💡 趕快點擊左上角的【開啟地圖】親自體驗吧！"
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
         return
         
-    # 🌟 核心功能 2：目的地精準搜尋 (只要不是上面那些按鈕指令，一律當作搜地點！)
+    # 🌟 核心功能 2：雙引擎自動判斷 (找地點 or AI 聊天)
     else:
         target_place = user_text
         try:
             GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
             if not GOOGLE_API_KEY:
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 系統缺少 Google API 金鑰，無法搜尋地點。"))
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 系統缺少 Google API 金鑰。"))
                 return
 
+            # 先請 Google 地圖判定這是不是一個「地點」
             url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
             params = {
                 'query': target_place, 'location': '25.0339,121.5644', 'radius': '20000',
@@ -414,11 +464,28 @@ def handle_message(event):
             }
             res = requests.get(url, params=params).json()
 
+            # 💡 如果 Google 找不到地點，代表使用者在跟機器人「聊天」 -> 無縫轉交 AI！
             if not res.get('results'):
-                # 就算輸入奇怪的文字找不到，也能優雅回應
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"😢 找不到「{target_place}」的相關地標，請換個關鍵字試試。"))
+                if gemini_model:
+                    try:
+                        # 賦予 AI 系統人設
+                        prompt = f"""
+                        你現在是「智慧停車地圖」的專屬 AI 客服小幫手。
+                        請用親切、簡短、活潑的繁體中文回答使用者的問題。
+                        如果使用者問到非停車的問題，也可以幽默地回應。
+                        使用者的訊息是：「{target_place}」
+                        """
+                        ai_response = gemini_model.generate_content(prompt)
+                        ai_reply_text = ai_response.text.strip()
+                        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"🤖 {ai_reply_text}"))
+                    except Exception as e:
+                        print(f"AI 產生失敗: {e}")
+                        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="😢 找不到這個地點，而且我的 AI 腦袋剛好當機了..."))
+                else:
+                    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"😢 找不到「{target_place}」的相關地標，請換個關鍵字試試。"))
                 return
 
+            # 如果 Google 有找到地點，就繼續「尋找附近車位」邏輯
             target_lat = res['results'][0]['geometry']['location']['lat']
             target_lng = res['results'][0]['geometry']['location']['lng']
             place_name = res['results'][0]['name']
@@ -450,8 +517,10 @@ def handle_message(event):
                 reply_msg = f"😢 【{place_name}】附近目前暫無空位資料。"
 
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
+            
         except Exception as e:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 搜尋發生錯誤，請稍後再試。"))
+            print(f"[ERROR] 處理失敗: {e}")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 系統發生錯誤，請稍後再試。"))
 
 # =========================================================
 # 🚀 伺服器啟動與背景排程
