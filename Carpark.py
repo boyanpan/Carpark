@@ -342,8 +342,8 @@ def handle_location(event):
 def handle_message(event):
     user_text = event.message.text.strip()
     
-    # 🟢 按鈕 B：空位推薦
-    if "推薦" in user_text:
+    # 🟢 按鈕 B：空位推薦 (同時支援「推薦」或「排行」)
+    if "推薦" in user_text or "排行" in user_text:
         try:
             conn = get_db_connection()
             cursor = conn.cursor(dictionary=True)
@@ -370,8 +370,8 @@ def handle_message(event):
         except Exception as e:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 資料庫查詢錯誤，請稍後再試！"))
             
-    # 🟢 按鈕 C：附近車位 (提示使用者傳送定位)
-    elif "附近" in user_text:
+    # 🟢 按鈕 C：附近車位 (同時支援「附近」或「適地」)
+    elif "附近" in user_text or "適地" in user_text:
         reply_msg = "📍 請點擊聊天室左下角的「＋」號，選擇「位置資訊」並傳送給我，馬上為您尋找最近的車位！"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
         
@@ -380,14 +380,23 @@ def handle_message(event):
         reply_msg = "🔮 【AI 預測教學】\n\n請點擊選單的「開啟地圖」，選擇您的目標停車場後，系統就會自動幫您預測 15 分鐘後抵達時會不會客滿喔！"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
 
-    # 🟢 按鈕 E：轉乘建議
-    elif "轉乘" in user_text:
+    # 🟢 按鈕 E：轉乘建議 (同時支援「轉乘」或「決策」)
+    elif "轉乘" in user_text or "決策" in user_text:
         reply_msg = "🚲 【智慧轉乘建議】\n\n我們支援 YouBike 與捷運智慧轉乘決策！請在網頁地圖中點擊目標，系統將為您計算最省時的移動方式。"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
 
-    # 🟢 按鈕 F：使用說明
-    elif "說明" in user_text:
-        reply_msg = "👋 歡迎使用智慧停車小幫手！\n\n您可以透過下方選單：\n1️⃣ 尋找目前空位最多的車位\n2️⃣ 傳送定位尋找最近車位\n3️⃣ 開啟地圖進行導航與 AI 預測\n\n快來體驗看看吧！"
+    # 🟢 按鈕 F：使用說明 (同時支援「說明」或「簡介」)
+    elif "說明" in user_text or "簡介" in user_text:
+        reply_msg = (
+            "👋 歡迎使用【智慧停車地圖系統】！\n\n"
+            "我們的網頁地圖搭載了最先進的技術，功能指南如下：\n\n"
+            "1️⃣ AI 預測與備案 🔮：點擊地圖「🅿️」開始導航，AI 將預測抵達時是否客滿，若客滿會自動彈出最近的備用車位供您「一鍵切換路線」！\n"
+            "2️⃣ 語音聲控助理 🎙️：點選地圖麥克風，直接說「幫我找台北車站」、「附近推薦」或「結束導航」，行車免動手！\n"
+            "3️⃣ 計時尋車防超收 🚙：停好車後點擊紀錄位置，系統會即時幫您精算停車費，並支援一鍵導航回愛車身邊。\n"
+            "4️⃣ 智慧轉乘決策 🚲：停好車還要走很遠？系統會依據距離自動精算 YouBike 或捷運的最快轉乘方案。\n"
+            "5️⃣ 條件智慧篩選 🎯：透過底部抽屜選單，可隨時切換「距離最近」或「費率最便宜」來排序車位清單。\n\n"
+            "💡 趕快點擊左上角的【開啟地圖】親自體驗吧！"
+        )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
         
     # 其他隨意輸入的文字
