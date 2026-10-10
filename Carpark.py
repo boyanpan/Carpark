@@ -17,11 +17,22 @@ from pyproj import Transformer
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 
+# 🟢 引入 LINE Bot 所需套件
+from linebot import LineBotApi, WebhookHandler
+from linebot.exceptions import InvalidSignatureError
+from linebot.models import MessageEvent, TextMessage, TextSendMessage
+
 # ⚙️ 載入 .env 檔案裡的機密資訊 (本地開發用，雲端會自動讀取系統環境變數)
 load_dotenv()
 
 # ⚙️ 初始化 Flask
 app = Flask(__name__, static_folder='car', static_url_path='/')
+
+# 🟢 初始化 LINE Bot API 與 Handler
+# (請確保 .env 檔案中已設定 LINE_CHANNEL_ACCESS_TOKEN 與 LINE_CHANNEL_SECRET)
+line_bot_api = LineBotApi(os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', ''))
+handler = WebhookHandler(os.environ.get('LINE_CHANNEL_SECRET', ''))
+
 # 載入 AI 預測模型
 try:
     ai_model = joblib.load('parking_model.pkl')
@@ -338,11 +349,45 @@ def predict_and_recommend():
 
 
 # =========================================================
+# 🟢 LINE Bot Webhook 接收與處理區塊
+# =========================================================
+@app.route("/callback", methods=['POST'])
+def callback():
+    # 取得 LINE 傳來的簽章
+    signature = request.headers.get('X-Line-Signature', '')
+    # 取得請求內容主體
+    body = request.get_data(as_text=True)
+    
+    try:
+        # 處理 Webhook
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        app.logger.info("Invalid signature. Please check your channel access token/channel secret.")
+        return 'Invalid signature', 400
+    
+    return 'OK'
+
+@handler.add(MessageEvent, message=TextMessage)
+def handle_message(event):
+    user_text = event.message.text
+    user_id = event.source.user_id # 供未來記錄使用者偏好使用
+    
+    if "推薦" in user_text:
+        reply_msg = "🔍 正在為您查詢最符合偏好的停車場...\n(這裡未來會串接您的智慧推薦資料庫！)"
+    else:
+        reply_msg = f"已收到您的訊息：「{user_text}」\n恭喜！您的系統已成功與 LINE 機器人連線 🎉"
+        
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text=reply_msg)
+    )
+
+# =========================================================
 # 🚀 伺服器啟動與背景排程 (已修復 Render Gunicorn 不會觸發排程的陷阱)
 # =========================================================
 
 # 1. 移出 if __name__ == "__main__": 區塊外，確保 Render 載入檔案時直接執行
-init_db()         
+init_db()        
 load_metro_data()  
 sync_data_to_db()  
 

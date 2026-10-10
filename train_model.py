@@ -53,5 +53,5 @@ print(f"✅ 模型訓練完成！預測準確度達: {accuracy * 100:.2f}%")
 
 # 5. 匯出模型 (這就是你的 AI 大腦)
 model_filename = 'parking_model.pkl'
-joblib.dump(model, model_filename)
+joblib.dump(model, model_filename, compress=3)
 print(f"💾 模型已成功存檔為：{model_filename} (準備整合進 Flask 系統囉！)")
