@@ -29,7 +29,6 @@ load_dotenv()
 app = Flask(__name__, static_folder='car', static_url_path='/')
 
 # 🟢 初始化 LINE Bot API 與 Handler
-# (請確保 .env 檔案中已設定 LINE_CHANNEL_ACCESS_TOKEN 與 LINE_CHANNEL_SECRET)
 line_bot_api = LineBotApi(os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', ''))
 handler = WebhookHandler(os.environ.get('LINE_CHANNEL_SECRET', ''))
 
@@ -262,7 +261,6 @@ def search_places():
 
     url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
     
-    # 🌟 修正：移除強制加「台北」的限制，改用 location 偏好中心點與 20 公里半徑
     params = {
         'query': query,
         'location': '25.0339,121.5644', 
@@ -309,18 +307,14 @@ def predict_and_recommend():
         return jsonify({"error": "AI 模型未載入"}), 500
         
     data = request.json
-    # 接收前端傳來的目標停車場數據
     total_spaces = data.get('total_spaces', 50)
     current_cars = data.get('current_cars', 40)
-    eta_minutes = data.get('eta_minutes', 15) # 預計幾分鐘後抵達
+    eta_minutes = data.get('eta_minutes', 15) 
     
-    # 計算抵達時的「未來時間」
     future_time = datetime.datetime.now() + datetime.timedelta(minutes=eta_minutes)
     hour = future_time.hour
     day_of_week = future_time.weekday()
     
-    # 1. 讓 AI 大腦進行預測
-    # 特徵順序必須與訓練時一致：['Hour', 'DayOfWeek', 'TotalSpaces', 'CurrentCars']
     prediction = ai_model.predict([[hour, day_of_week, total_spaces, current_cars]])[0]
     
     if prediction == 0:
@@ -329,9 +323,6 @@ def predict_and_recommend():
             "msg": "✨ AI 預測：抵達時車位充足，請安心前往！"
         })
         
-    # 2. 如果預測會客滿，觸發「推薦替代方案」邏輯
-    # (實務上這裡可以寫一小段邏輯，從你的資料庫篩選附近空位最多的停車場)
-    # 這裡先假定系統為使用者找到了一個最佳備案：
     alternative_lot = {
         "name": "附近備用室內停車場",
         "lat": 25.0339, 
@@ -347,19 +338,15 @@ def predict_and_recommend():
         "recommendation": alternative_lot
     })
 
-
 # =========================================================
 # 🟢 LINE Bot Webhook 接收與處理區塊
 # =========================================================
 @app.route("/callback", methods=['POST'])
 def callback():
-    # 取得 LINE 傳來的簽章
     signature = request.headers.get('X-Line-Signature', '')
-    # 取得請求內容主體
     body = request.get_data(as_text=True)
     
     try:
-        # 處理 Webhook
         handler.handle(body, signature)
     except InvalidSignatureError:
         app.logger.info("Invalid signature. Please check your channel access token/channel secret.")
@@ -369,35 +356,67 @@ def callback():
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    user_text = event.message.text
-    user_id = event.source.user_id # 供未來記錄使用者偏好使用
+    user_text = event.message.text.strip()
     
-    if "推薦" in user_text:
-        reply_msg = "🔍 正在為您查詢最符合偏好的停車場...\n(這裡未來會串接您的智慧推薦資料庫！)"
+    # 🌟 當使用者輸入包含「推薦」或「停車」時，觸發資料庫查詢
+    if "推薦" in user_text or "停車" in user_text:
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor(dictionary=True)
+            
+            # 從 Aiven 資料庫找出目前空位最多的前 3 名停車場
+            cursor.execute("""
+                SELECT name, address, available_car, total_car, payex 
+                FROM parking_lots 
+                WHERE available_car > 0 
+                ORDER BY available_car DESC 
+                LIMIT 3
+            """)
+            lots = cursor.fetchall()
+            cursor.close()
+            conn.close()
+
+            # 組裝回覆文字
+            if lots:
+                reply_msg = "🔍 為您推薦目前空位最多的停車場：\n\n"
+                for lot in lots:
+                    reply_msg += f"🅿️ 【{lot['name']}】\n"
+                    reply_msg += f"📍 位置：{lot['address']}\n"
+                    reply_msg += f"🚗 空位：{lot['available_car']} / {lot['total_car']}\n"
+                    reply_msg += f"💰 費率：{lot['payex']}\n"
+                    reply_msg += "-" * 15 + "\n"
+                reply_msg += "請確認是否需要為您開啟導航或預測未來車位？"
+            else:
+                reply_msg = "😢 目前附近暫無空位資料，或資料庫正在更新中。"
+
+        except Exception as e:
+            print(f"[ERROR] LINE 資料庫查詢失敗: {e}")
+            reply_msg = "⚠️ 資料庫查詢發生錯誤，請稍後再試！"
+            
     else:
-        reply_msg = f"已收到您的訊息：「{user_text}」\n恭喜！您的系統已成功與 LINE 機器人連線 🎉"
+        # 如果輸入其他文字，則提示如何使用
+        reply_msg = f"已收到您的訊息：「{user_text}」\n\n💡 如需尋找車位，請輸入「推薦」或「停車」！"
         
+    # 將回覆傳給使用者
     line_bot_api.reply_message(
         event.reply_token,
         TextSendMessage(text=reply_msg)
     )
 
 # =========================================================
-# 🚀 伺服器啟動與背景排程 (已修復 Render Gunicorn 不會觸發排程的陷阱)
+# 🚀 伺服器啟動與背景排程
 # =========================================================
 
-# 1. 移出 if __name__ == "__main__": 區塊外，確保 Render 載入檔案時直接執行
 init_db()        
 load_metro_data()  
-sync_data_to_db()  
 
-# 2. 啟動背景排程 (每 3 分鐘自動執行)
 scheduler = BackgroundScheduler(daemon=True)
 scheduler.add_job(func=sync_data_to_db, trigger='interval', minutes=3)
+# 延遲 3 秒執行第一次同步，避免開機卡死
+scheduler.add_job(func=sync_data_to_db, trigger='date', run_date=datetime.datetime.now() + datetime.timedelta(seconds=3))
 scheduler.start()
-print("[INFO] ⏱️ 背景自動更新排程已啟動 (每 3 分鐘)")
+print("[INFO] ⏱️ 背景自動更新排程已啟動")
 
-# 3. 本地端開發測試用的啟動入口
 if __name__ == "__main__":
     try:
         app.run(host='0.0.0.0', port=5000, debug=False) 
