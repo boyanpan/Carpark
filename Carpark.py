@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 # 🟢 引入 LINE Bot 所需套件
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, TextSendMessage
+from linebot.models import MessageEvent, TextMessage, TextSendMessage, TemplateSendMessage, ButtonsTemplate, URITemplateAction
 
 # ⚙️ 載入 .env 檔案裡的機密資訊 (本地開發用，雲端會自動讀取系統環境變數)
 load_dotenv()
@@ -358,13 +358,12 @@ def callback():
 def handle_message(event):
     user_text = event.message.text.strip()
     
-    # 🌟 當使用者輸入包含「推薦」或「停車」時，觸發資料庫查詢
+    # 🌟 1. 推薦停車場功能
     if "推薦" in user_text or "停車" in user_text:
         try:
             conn = get_db_connection()
             cursor = conn.cursor(dictionary=True)
             
-            # 從 Aiven 資料庫找出目前空位最多的前 3 名停車場
             cursor.execute("""
                 SELECT name, address, available_car, total_car, payex 
                 FROM parking_lots 
@@ -376,7 +375,6 @@ def handle_message(event):
             cursor.close()
             conn.close()
 
-            # 組裝回覆文字
             if lots:
                 reply_msg = "🔍 為您推薦目前空位最多的停車場：\n\n"
                 for lot in lots:
@@ -385,23 +383,49 @@ def handle_message(event):
                     reply_msg += f"🚗 空位：{lot['available_car']} / {lot['total_car']}\n"
                     reply_msg += f"💰 費率：{lot['payex']}\n"
                     reply_msg += "-" * 15 + "\n"
-                reply_msg += "請確認是否需要為您開啟導航或預測未來車位？"
+                reply_msg += "💡 輸入「地圖」即可開啟導航與 AI 預測！"
+                
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text=reply_msg)
+                )
             else:
-                reply_msg = "😢 目前附近暫無空位資料，或資料庫正在更新中。"
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="😢 目前附近暫無空位資料，或資料庫正在更新中。")
+                )
 
         except Exception as e:
             print(f"[ERROR] LINE 資料庫查詢失敗: {e}")
-            reply_msg = "⚠️ 資料庫查詢發生錯誤，請稍後再試！"
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="⚠️ 資料庫查詢發生錯誤，請稍後再試！")
+            )
             
-    else:
-        # 如果輸入其他文字，則提示如何使用
-        reply_msg = f"已收到您的訊息：「{user_text}」\n\n💡 如需尋找車位，請輸入「推薦」或「停車」！"
+    # 🌟 2. 開啟 LIFF 網頁地圖功能 (你的專屬網址已寫入)
+    elif "地圖" in user_text or "網頁" in user_text:
+        buttons_template = TemplateSendMessage(
+            alt_text='請在手機上查看智慧停車地圖',
+            template=ButtonsTemplate(
+                title='🗺️ 智慧停車地圖系統',
+                text='點擊下方按鈕，直接在 LINE 裡面尋找車位與開啟預測系統！',
+                actions=[
+                    URITemplateAction(
+                        label='📍 開啟地圖',
+                        uri='https://liff.line.me/2011961023-onEusMxY'
+                    )
+                ]
+            )
+        )
+        line_bot_api.reply_message(event.reply_token, buttons_template)
         
-    # 將回覆傳給使用者
-    line_bot_api.reply_message(
-        event.reply_token,
-        TextSendMessage(text=reply_msg)
-    )
+    # 🌟 3. 其他預設回覆
+    else:
+        reply_msg = f"已收到您的訊息：「{user_text}」\n\n💡 尋找車位請輸入「推薦」\n🗺️ 開啟網頁地圖請輸入「地圖」"
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=reply_msg)
+        )
 
 # =========================================================
 # 🚀 伺服器啟動與背景排程
