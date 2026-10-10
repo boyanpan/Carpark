@@ -17,12 +17,12 @@ from pyproj import Transformer
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 
-# 🟢 引入 LINE Bot 所需套件
+# 🟢 引入 LINE Bot 所需套件 (已包含 LocationMessage)
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, TextSendMessage, TemplateSendMessage, ButtonsTemplate, URITemplateAction
+from linebot.models import MessageEvent, TextMessage, TextSendMessage, TemplateSendMessage, ButtonsTemplate, URITemplateAction, LocationMessage
 
-# ⚙️ 載入 .env 檔案裡的機密資訊 (本地開發用，雲端會自動讀取系統環境變數)
+# ⚙️ 載入環境變數
 load_dotenv()
 
 # ⚙️ 初始化 Flask
@@ -40,21 +40,14 @@ except Exception as e:
     ai_model = None
     print(f"⚠️ AI 模型載入失敗: {e}")
 
-# 🎯 解放 CORS：允許前端跨網域索取資料
-CORS(app, resources={
-    r"/*": {
-        "origins": "*",
-        "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": "*"
-    }
-})
+CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"], "allow_headers": "*"}})
 
 # =========================================================
 # ☁️ Aiven 資料庫連線設定
 # =========================================================
 DB_CONFIG = {
     'user': 'avnadmin',
-    'password': os.environ.get('DB_PASSWORD'), # 安全讀取資料庫密碼
+    'password': os.environ.get('DB_PASSWORD'),
     'host': 'mysql-14bf0d58-iljsauw-7901.c.aivencloud.com',
     'port': 11576,
     'database': 'defaultdb',
@@ -171,11 +164,7 @@ def calculate_best_transit_mode(distance: float, pure_walk_time: float, yb_data:
     recommendation_reason = ""
 
     if pure_walk_time <= 10 or distance <= 800:
-        return {
-            "mode": "WALK",
-            "total_time": pure_walk_time,
-            "reason": ""
-        }
+        return {"mode": "WALK", "total_time": pure_walk_time, "reason": ""}
 
     total_yb_time = float('inf')
     if yb_data and yb_data.get('is_valid'):
@@ -198,17 +187,9 @@ def calculate_best_transit_mode(distance: float, pure_walk_time: float, yb_data:
     if best_mode != 'WALK':
         time_saved = pure_walk_time - best_time
         if time_saved <= 3:
-            return {
-                "mode": "WALK",
-                "total_time": pure_walk_time,
-                "reason": ""
-            }
+            return {"mode": "WALK", "total_time": pure_walk_time, "reason": ""}
 
-    return {
-        "mode": best_mode,
-        "total_time": int(best_time), 
-        "reason": recommendation_reason
-    }
+    return {"mode": best_mode, "total_time": int(best_time), "reason": recommendation_reason}
 
 # =========================================================
 # 🌐 API 路由區塊
@@ -242,46 +223,33 @@ def nearby():
                 "structureType": row["structure_type"]
             })
 
-        return jsonify({
-            "message": "success",
-            "nearby": formatted_data
-        })
+        return jsonify({"message": "success", "nearby": formatted_data})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/search_places", methods=["GET"])
 def search_places():
     query = request.args.get('q')
-    if not query:
-        return jsonify([])
+    if not query: return jsonify([])
 
     GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
-    if not GOOGLE_API_KEY:
-        return jsonify({"error": "伺服器缺少 Google API Key 環境變數"}), 500
+    if not GOOGLE_API_KEY: return jsonify({"error": "缺少 Google API Key"}), 500
 
     url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
-    
     params = {
-        'query': query,
-        'location': '25.0339,121.5644', 
-        'radius': '20000',            
-        'language': 'zh-TW',
-        'region': 'tw',
-        'key': GOOGLE_API_KEY
+        'query': query, 'location': '25.0339,121.5644', 'radius': '20000',            
+        'language': 'zh-TW', 'region': 'tw', 'key': GOOGLE_API_KEY
     }
 
     try:
         response = requests.get(url, params=params)
         data = response.json()
-
         results = []
         for place in data.get('results', [])[:6]: 
             address = place.get('formatted_address', '').replace('台灣', '').strip()
             results.append({
-                'name': place.get('name'), 
-                'address': address,
-                'lat': place['geometry']['location']['lat'],
-                'lng': place['geometry']['location']['lng']
+                'name': place.get('name'), 'address': address,
+                'lat': place['geometry']['location']['lat'], 'lng': place['geometry']['location']['lng']
             })
         return jsonify(results)
     except Exception as e:
@@ -291,51 +259,30 @@ def search_places():
 def recommend_transit():
     try:
         data = request.json or {}
-        distance = data.get('distance', 0)
-        pure_walk_time = data.get('pure_walk_time', 0)
-        yb_data = data.get('yb_data', None)
-        metro_data = data.get('metro_data', None)
-
-        decision = calculate_best_transit_mode(distance, pure_walk_time, yb_data, metro_data)
+        decision = calculate_best_transit_mode(data.get('distance', 0), data.get('pure_walk_time', 0), data.get('yb_data', None), data.get('metro_data', None))
         return jsonify(decision)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/predict_and_recommend', methods=['POST'])
 def predict_and_recommend():
-    if not ai_model:
-        return jsonify({"error": "AI 模型未載入"}), 500
+    if not ai_model: return jsonify({"error": "AI 模型未載入"}), 500
         
     data = request.json
-    total_spaces = data.get('total_spaces', 50)
-    current_cars = data.get('current_cars', 40)
-    eta_minutes = data.get('eta_minutes', 15) 
+    total_spaces, current_cars, eta_minutes = data.get('total_spaces', 50), data.get('current_cars', 40), data.get('eta_minutes', 15) 
     
     future_time = datetime.datetime.now() + datetime.timedelta(minutes=eta_minutes)
-    hour = future_time.hour
-    day_of_week = future_time.weekday()
-    
-    prediction = ai_model.predict([[hour, day_of_week, total_spaces, current_cars]])[0]
+    prediction = ai_model.predict([[future_time.hour, future_time.weekday(), total_spaces, current_cars]])[0]
     
     if prediction == 0:
-        return jsonify({
-            "will_be_full": False, 
-            "msg": "✨ AI 預測：抵達時車位充足，請安心前往！"
-        })
+        return jsonify({"will_be_full": False, "msg": "✨ AI 預測：抵達時車位充足，請安心前往！"})
         
-    alternative_lot = {
-        "name": "附近備用室內停車場",
-        "lat": 25.0339, 
-        "lng": 121.5644,
-        "available_spaces": 12,
-        "rate": "40元/小時",
-        "reason": "距離原目的地僅 300 公尺，且目前空位率高"
-    }
-    
     return jsonify({
-        "will_be_full": True,
-        "msg": "⚠️ AI 預測：抵達時該停車場極可能客滿！",
-        "recommendation": alternative_lot
+        "will_be_full": True, "msg": "⚠️ AI 預測：抵達時該停車場極可能客滿！",
+        "recommendation": {
+            "name": "附近備用室內停車場", "lat": 25.0339, "lng": 121.5644,
+            "available_spaces": 12, "rate": "40元/小時", "reason": "距離原目的地僅 300 公尺，且目前空位率高"
+        }
     })
 
 # =========================================================
@@ -345,98 +292,118 @@ def predict_and_recommend():
 def callback():
     signature = request.headers.get('X-Line-Signature', '')
     body = request.get_data(as_text=True)
-    
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
-        app.logger.info("Invalid signature. Please check your channel access token/channel secret.")
         return 'Invalid signature', 400
-    
     return 'OK'
 
+# 📍 處理使用者傳送的 GPS 定位 (找附近車位)
+@handler.add(MessageEvent, message=LocationMessage)
+def handle_location(event):
+    user_lat = event.message.latitude
+    user_lng = event.message.longitude
+    
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        # 尋找有空位，且距離使用者座標最近的前 3 個停車場
+        sql = f"""
+            SELECT name, address, available_car, total_car, payex,
+            (POW(lat - {user_lat}, 2) + POW(lng - {user_lng}, 2)) as distance 
+            FROM parking_lots 
+            WHERE available_car > 0 
+            ORDER BY distance ASC 
+            LIMIT 3
+        """
+        cursor.execute(sql)
+        lots = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        if lots:
+            reply_msg = "📍 根據您的位置，最近的空車位推薦：\n\n"
+            for lot in lots:
+                reply_msg += f"🅿️ 【{lot['name']}】\n"
+                reply_msg += f"🚗 空位：{lot['available_car']} / {lot['total_car']}\n"
+                reply_msg += f"💰 費率：{lot['payex']}\n"
+                reply_msg += "-" * 15 + "\n"
+            reply_msg += "💡 點擊選單【開啟地圖】按鈕即可直接導航！"
+        else:
+            reply_msg = "😢 附近暫無空位資料。"
+
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
+    except Exception as e:
+        print(f"[ERROR] 定位搜尋失敗: {e}")
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 搜尋發生錯誤，請稍後再試。"))
+
+# 💬 處理使用者傳送的文字 (對應圖文選單的按鈕)
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_text = event.message.text.strip()
     
-    # 🌟 1. 推薦停車場功能
-    if "推薦" in user_text or "停車" in user_text:
+    # 🟢 按鈕 B：空位推薦
+    if "推薦" in user_text:
         try:
             conn = get_db_connection()
             cursor = conn.cursor(dictionary=True)
-            
             cursor.execute("""
                 SELECT name, address, available_car, total_car, payex 
-                FROM parking_lots 
-                WHERE available_car > 0 
-                ORDER BY available_car DESC 
-                LIMIT 3
+                FROM parking_lots WHERE available_car > 0 
+                ORDER BY available_car DESC LIMIT 3
             """)
             lots = cursor.fetchall()
             cursor.close()
             conn.close()
 
             if lots:
-                reply_msg = "🔍 為您推薦目前空位最多的停車場：\n\n"
+                reply_msg = "🏆 為您推薦目前空位最多的停車場：\n\n"
                 for lot in lots:
                     reply_msg += f"🅿️ 【{lot['name']}】\n"
                     reply_msg += f"📍 位置：{lot['address']}\n"
                     reply_msg += f"🚗 空位：{lot['available_car']} / {lot['total_car']}\n"
                     reply_msg += f"💰 費率：{lot['payex']}\n"
                     reply_msg += "-" * 15 + "\n"
-                reply_msg += "💡 輸入「地圖」即可開啟導航與 AI 預測！"
-                
-                line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(text=reply_msg)
-                )
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
             else:
-                line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(text="😢 目前附近暫無空位資料，或資料庫正在更新中。")
-                )
-
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="😢 目前暫無空位資料。"))
         except Exception as e:
-            print(f"[ERROR] LINE 資料庫查詢失敗: {e}")
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text="⚠️ 資料庫查詢發生錯誤，請稍後再試！")
-            )
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 資料庫查詢錯誤，請稍後再試！"))
             
-    # 🌟 2. 開啟 LIFF 網頁地圖功能 (你的專屬網址已寫入)
-    elif "地圖" in user_text or "網頁" in user_text:
-        buttons_template = TemplateSendMessage(
-            alt_text='請在手機上查看智慧停車地圖',
-            template=ButtonsTemplate(
-                title='🗺️ 智慧停車地圖系統',
-                text='點擊下方按鈕，直接在 LINE 裡面尋找車位與開啟預測系統！',
-                actions=[
-                    URITemplateAction(
-                        label='📍 開啟地圖',
-                        uri='https://liff.line.me/2011961023-onEusMxY'
-                    )
-                ]
-            )
-        )
-        line_bot_api.reply_message(event.reply_token, buttons_template)
+    # 🟢 按鈕 C：附近車位 (提示使用者傳送定位)
+    elif "附近" in user_text:
+        reply_msg = "📍 請點擊聊天室左下角的「＋」號，選擇「位置資訊」並傳送給我，馬上為您尋找最近的車位！"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
         
-    # 🌟 3. 其他預設回覆
+    # 🟢 按鈕 D：預測教學
+    elif "預測" in user_text:
+        reply_msg = "🔮 【AI 預測教學】\n\n請點擊選單的「開啟地圖」，選擇您的目標停車場後，系統就會自動幫您預測 15 分鐘後抵達時會不會客滿喔！"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
+
+    # 🟢 按鈕 E：轉乘建議
+    elif "轉乘" in user_text:
+        reply_msg = "🚲 【智慧轉乘建議】\n\n我們支援 YouBike 與捷運智慧轉乘決策！請在網頁地圖中點擊目標，系統將為您計算最省時的移動方式。"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
+
+    # 🟢 按鈕 F：使用說明
+    elif "說明" in user_text:
+        reply_msg = "👋 歡迎使用智慧停車小幫手！\n\n您可以透過下方選單：\n1️⃣ 尋找目前空位最多的車位\n2️⃣ 傳送定位尋找最近車位\n3️⃣ 開啟地圖進行導航與 AI 預測\n\n快來體驗看看吧！"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
+        
+    # 其他隨意輸入的文字
     else:
-        reply_msg = f"已收到您的訊息：「{user_text}」\n\n💡 尋找車位請輸入「推薦」\n🗺️ 開啟網頁地圖請輸入「地圖」"
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=reply_msg)
-        )
+        reply_msg = f"已收到您的訊息：「{user_text}」\n💡 請使用下方選單按鈕進行操作喔！"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
 
 # =========================================================
 # 🚀 伺服器啟動與背景排程
 # =========================================================
-
 init_db()        
 load_metro_data()  
 
 scheduler = BackgroundScheduler(daemon=True)
 scheduler.add_job(func=sync_data_to_db, trigger='interval', minutes=3)
-# 延遲 3 秒執行第一次同步，避免開機卡死
+# 延遲 3 秒執行第一次同步，避免伺服器開機超時
 scheduler.add_job(func=sync_data_to_db, trigger='date', run_date=datetime.datetime.now() + datetime.timedelta(seconds=3))
 scheduler.start()
 print("[INFO] ⏱️ 背景自動更新排程已啟動")
