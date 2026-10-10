@@ -298,96 +298,160 @@ def callback():
         return 'Invalid signature', 400
     return 'OK'
 
-# 📍 處理使用者傳送的 GPS 定位 (找附近車位)
-@handler.add(MessageEvent, message=LocationMessage)
-def handle_location(event):
-    user_lat = event.message.latitude
-    user_lng = event.message.longitude
-    
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
-        # 尋找有空位，且距離使用者座標最近的前 3 個停車場
-        sql = f"""
-            SELECT name, address, available_car, total_car, payex,
-            (POW(lat - {user_lat}, 2) + POW(lng - {user_lng}, 2)) as distance 
-            FROM parking_lots 
-            WHERE available_car > 0 
-            ORDER BY distance ASC 
-            LIMIT 3
-        """
-        cursor.execute(sql)
-        lots = cursor.fetchall()
-        cursor.close()
-        conn.close()
-
-        if lots:
-            reply_msg = "📍 根據您的位置，最近的空車位推薦：\n\n"
-            for lot in lots:
-                reply_msg += f"🅿️ 【{lot['name']}】\n"
-                reply_msg += f"🚗 空位：{lot['available_car']} / {lot['total_car']}\n"
-                reply_msg += f"💰 費率：{lot['payex']}\n"
-                reply_msg += "-" * 15 + "\n"
-            reply_msg += "💡 點擊選單【開啟地圖】按鈕即可直接導航！"
-        else:
-            reply_msg = "😢 附近暫無空位資料。"
-
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
-    except Exception as e:
-        print(f"[ERROR] 定位搜尋失敗: {e}")
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 搜尋發生錯誤，請稍後再試。"))
-
 # 💬 處理使用者傳送的文字 (對應圖文選單的按鈕)
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_text = event.message.text.strip()
     
-    # 🟢 按鈕 B：目的地尋車 (取代原本無用的空位排名)
+    # 🟢 按鈕 B：目的地尋車教學 (教學文字已拿掉「找」字)
     if "推薦" in user_text or "尋車" in user_text or "地標" in user_text:
         reply_msg = (
             "📍 【目的地精準尋車】\n\n"
             "想知道要去的地方附近有沒有車位嗎？\n"
-            "請直接在聊天室輸入「找 ＋ 地點」！\n\n"
+            "請直接在聊天室輸入「地點名稱」！\n\n"
             "💡 測試範例：\n"
-            "👉 找 台北101\n"
-            "👉 找 新莊體育館\n\n"
+            "👉 台北101\n"
+            "👉 新莊體育館\n\n"
             "系統會結合 Google 地圖與即時車況，為您算出距離最近的空車位喔！"
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
+        return
             
-    # 🟢 按鈕 C：附近車位 (同時支援「附近」或「適地」)
-    elif "附近" in user_text or "適地" in user_text:
-        reply_msg = "📍 請點擊聊天室左下角的「＋」號，選擇「位置資訊」並傳送給我，馬上為您尋找最近的車位！"
+    # 🟢 按鈕 C：資訊查詢教學
+    elif "附近" in user_text or "查詢" in user_text or "資訊" in user_text:
+        reply_msg = (
+            "🔎 【停車場詳細資訊查詢】\n\n"
+            "想知道某個停車場的具體收費、地址與即時車況嗎？\n"
+            "請直接輸入「查 ＋ 名稱」！\n\n"
+            "💡 測試範例：\n"
+            "👉 查 嘟嘟房\n"
+            "👉 查 體育館\n\n"
+            "我會馬上為您調出該停車場的完整詳細檔案！"
+        )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
+        return
+
+    # 🌟 核心功能 1：處理「查 ＋ 關鍵字」功能 (去資料庫撈詳細資料)
+    elif user_text.startswith("查 "):
+        keyword = user_text[1:].strip()
+        if not keyword:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="💡 請輸入要查詢的名稱，例如：「查 嘟嘟房」"))
+            return
+
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor(dictionary=True)
+            sql = f"""
+                SELECT name, address, available_car, total_car, payex, structure_type, category 
+                FROM parking_lots 
+                WHERE name LIKE '%{keyword}%' OR address LIKE '%{keyword}%'
+                LIMIT 3
+            """
+            cursor.execute(sql)
+            lots = cursor.fetchall()
+            cursor.close()
+            conn.close()
+
+            if lots:
+                reply_msg = f"🔎 關於【{keyword}】的詳細資訊：\n\n"
+                for lot in lots:
+                    struct = f" ({lot['structure_type']})" if lot.get('structure_type') else ""
+                    reply_msg += f"🏢 名稱：{lot['name']}{struct}\n"
+                    reply_msg += f"📍 地址：{lot['address']}\n"
+                    reply_msg += f"🏷️ 類型：{lot['category']}\n"
+                    reply_msg += f"🚗 車位：{lot['available_car']} / {lot['total_car']} (即時/總數)\n"
+                    reply_msg += f"💰 收費標準：\n{lot['payex']}\n"
+                    reply_msg += "-" * 15 + "\n"
+            else:
+                reply_msg = f"😢 資料庫中找不到包含「{keyword}」的停車場資訊。"
+
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
+        except Exception as e:
+            print(f"[ERROR] 資訊查詢失敗: {e}")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 查詢錯誤，請稍後再試。"))
+        return
         
     # 🟢 按鈕 D：預測教學
     elif "預測" in user_text:
         reply_msg = "🔮 【AI 預測教學】\n\n請點擊選單的「開啟地圖」，選擇您的目標停車場後，系統就會自動幫您預測 15 分鐘後抵達時會不會客滿喔！"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
+        return
 
-    # 🟢 按鈕 E：轉乘建議 (同時支援「轉乘」或「決策」)
+    # 🟢 按鈕 E：轉乘建議
     elif "轉乘" in user_text or "決策" in user_text:
         reply_msg = "🚲 【智慧轉乘建議】\n\n我們支援 YouBike 與捷運智慧轉乘決策！請在網頁地圖中點擊目標，系統將為您計算最省時的移動方式。"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
+        return
 
-    # 🟢 按鈕 F：使用說明 (同時支援「說明」或「簡介」)
+    # 🟢 按鈕 F：使用說明
     elif "說明" in user_text or "簡介" in user_text:
         reply_msg = (
             "👋 歡迎使用【智慧停車地圖系統】！\n\n"
             "我們的網頁地圖搭載了最先進的技術，功能指南如下：\n\n"
             "1️⃣ AI 預測與備案 🔮：點擊地圖「🅿️」開始導航，AI 將預測抵達時是否客滿，若客滿會自動彈出最近的備用車位供您「一鍵切換路線」！\n"
-            "2️⃣ 語音聲控助理 🎙️：點選地圖麥克風，直接說「幫我找台北車站」、「附近推薦」或「結束導航」，行車免動手！\n"
+            "2️⃣ 語音聲控助理 🎙️：點選地圖麥克風，直接說「找 台北車站」免動手！\n"
             "3️⃣ 計時尋車防超收 🚙：停好車後點擊紀錄位置，系統會即時幫您精算停車費，並支援一鍵導航回愛車身邊。\n"
             "4️⃣ 智慧轉乘決策 🚲：停好車還要走很遠？系統會依據距離自動精算 YouBike 或捷運的最快轉乘方案。\n"
-            "5️⃣ 條件智慧篩選 🎯：透過底部抽屜選單，可隨時切換「距離最近」或「費率最便宜」來排序車位清單。\n\n"
+            "5️⃣ 條件智慧篩選 🎯：透過底部抽屜選單，可隨時切換「距離最近」或「費率最便宜」來排序。\n\n"
             "💡 趕快點擊左上角的【開啟地圖】親自體驗吧！"
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
+        return
         
-    # 其他隨意輸入的文字
+    # 🌟 核心功能 2：目的地精準搜尋 (只要不是上面那些按鈕指令，一律當作搜地點！)
     else:
-        reply_msg = f"已收到您的訊息：「{user_text}」\n💡 請使用下方選單按鈕進行操作喔！"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
+        target_place = user_text
+        try:
+            GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
+            if not GOOGLE_API_KEY:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 系統缺少 Google API 金鑰，無法搜尋地點。"))
+                return
+
+            url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+            params = {
+                'query': target_place, 'location': '25.0339,121.5644', 'radius': '20000',
+                'language': 'zh-TW', 'region': 'tw', 'key': GOOGLE_API_KEY
+            }
+            res = requests.get(url, params=params).json()
+
+            if not res.get('results'):
+                # 就算輸入奇怪的文字找不到，也能優雅回應
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"😢 找不到「{target_place}」的相關地標，請換個關鍵字試試。"))
+                return
+
+            target_lat = res['results'][0]['geometry']['location']['lat']
+            target_lng = res['results'][0]['geometry']['location']['lng']
+            place_name = res['results'][0]['name']
+
+            conn = get_db_connection()
+            cursor = conn.cursor(dictionary=True)
+            sql = f"""
+                SELECT name, address, available_car, total_car, payex,
+                (POW(lat - {target_lat}, 2) + POW(lng - {target_lng}, 2)) as distance 
+                FROM parking_lots 
+                WHERE available_car > 0 
+                ORDER BY distance ASC 
+                LIMIT 3
+            """
+            cursor.execute(sql)
+            lots = cursor.fetchall()
+            cursor.close()
+            conn.close()
+
+            if lots:
+                reply_msg = f"📍 幫您尋找【{place_name}】附近的車位：\n\n"
+                for lot in lots:
+                    reply_msg += f"🅿️ 【{lot['name']}】\n"
+                    reply_msg += f"🚗 空位：{lot['available_car']} / {lot['total_car']}\n"
+                    reply_msg += f"💰 費率：{lot['payex']}\n"
+                    reply_msg += "-" * 15 + "\n"
+                reply_msg += "💡 點擊選單【開啟地圖】可一鍵啟動導航！"
+            else:
+                reply_msg = f"😢 【{place_name}】附近目前暫無空位資料。"
+
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
+        except Exception as e:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 搜尋發生錯誤，請稍後再試。"))
 
 # =========================================================
 # 🚀 伺服器啟動與背景排程
