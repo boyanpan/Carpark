@@ -482,6 +482,10 @@ def handle_message(event):
                 contents=prompt
             )
             ai_reply_text = response.text.strip()
+            
+            # 🌟 新增這行：把 AI 習慣用的粗體符號 ** 直接清除掉
+            ai_reply_text = ai_reply_text.replace('**', '')
+            
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"🤖 {ai_reply_text}"))
         except Exception as e:
             print(f"AI 產生失敗: {e}")
