@@ -478,14 +478,14 @@ def handle_message(event):
             """
             # 使用最新穩定版模型
             response = gemini_client.models.generate_content(
-                model='gemini-1.5-flash',
+                model='gemini-2.5-flash',  # 🌟 換成目前 Google 最新且支援的模型
                 contents=prompt
             )
             ai_reply_text = response.text.strip()
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"🤖 {ai_reply_text}"))
         except Exception as e:
             print(f"AI 產生失敗: {e}")
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"🤖 抓到兇手了！錯誤代碼是：\n{str(e)}"))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"錯誤代碼：\n{str(e)}"))
     else:
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="💡 我是停車小幫手！您可以點擊下方選單的「目的地尋車」來找車位喔！"))
 
