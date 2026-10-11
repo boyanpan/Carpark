@@ -347,46 +347,70 @@ def handle_location(event):
         print(f"[ERROR] 定位搜尋失敗: {e}")
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 搜尋發生錯誤，請稍後再試。"))
 
-# 💬 處理使用者傳送的文字
+# 🧠 建立一個大腦記憶區，用來記住每個使用者現在正在做什麼
+user_states = {}
+
+# 💬 處理使用者傳送的文字 (具備記憶功能的終極版)
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_text = event.message.text.strip()
+    user_id = event.source.user_id  # 抓取目前是哪位使用者在講話
     
-    # 🟢 按鈕 B：目的地尋車教學
-    if "推薦" in user_text or "尋車" in user_text or "地標" in user_text:
-        reply_msg = (
-            "📍 【目的地精準尋車】\n\n"
-            "想知道要去的地方附近有沒有車位嗎？\n"
-            "請直接在聊天室輸入「地點名稱」！\n\n"
-            "💡 測試範例：\n"
-            "👉 台北101\n"
-            "👉 新莊體育館\n\n"
-            "系統會結合 Google 地圖與即時車況，為您算出距離最近的空車位喔！"
-        )
+    # ==========================================
+    # 🟢 1. 處理圖文選單的按鈕 (設定狀態)
+    # ==========================================
+    if user_text in ["尋車", "推薦", "地標"]:
+        user_states[user_id] = "waiting_for_recommend" # 記住該使用者進入「找車位模式」
+        reply_msg = "📍 【目的地精準尋車】\n\n請直接輸入您想去的地點（例如：台北101、新莊體育館）：\n\n(若想退出此模式，請輸入「取消」)"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
         return
             
-    # 🟢 按鈕 C：資訊查詢教學
-    elif "附近" in user_text or "查詢" in user_text or "資訊" in user_text:
+    elif user_text in ["查詢", "資訊", "附近"]:
+        user_states[user_id] = "waiting_for_query" # 記住該使用者進入「查詳細資料模式」
+        reply_msg = "🔎 【停車場詳細資訊查詢】\n\n請直接輸入停車場名稱（例如：嘟嘟房、體育館）：\n\n(若想退出此模式，請輸入「取消」)"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
+        return
+        
+    elif user_text == "取消":
+        user_states.pop(user_id, None) # 清除記憶
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="✅ 已為您取消動作！現在您可以隨便跟我聊天囉。"))
+        return
+
+    # 點擊其他按鈕時，自動清除先前的記憶，避免錯亂
+    elif user_text in ["預測", "預測教學"]:
+        user_states.pop(user_id, None)
+        reply_msg = "🔮 【AI 預測教學】\n\n請點擊選單的「開啟地圖」，選擇目標停車場後，系統將自動預測抵達時是否客滿！"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
+        return
+
+    elif user_text in ["轉乘", "轉乘建議", "決策"]:
+        user_states.pop(user_id, None)
+        reply_msg = "🚲 【智慧轉乘建議】\n\n我們支援 YouBike 與捷運智慧轉乘！請在地圖中點擊目標，系統將精算最省時方案。"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
+        return
+
+    elif user_text in ["說明", "使用說明", "簡介"]:
+        user_states.pop(user_id, None)
         reply_msg = (
-            "🔎 【停車場詳細資訊查詢】\n\n"
-            "想知道某個停車場的具體收費、地址與即時車況嗎？\n"
-            "請直接輸入「查 ＋ 名稱」！\n\n"
-            "💡 測試範例：\n"
-            "👉 查 嘟嘟房\n"
-            "👉 查 體育館\n\n"
-            "我會馬上為您調出該停車場的完整詳細檔案！"
+            "👋 歡迎使用【智慧停車地圖系統】！\n\n"
+            "1️⃣ AI 預測 🔮：導航時自動預測是否客滿，並提供備案！\n"
+            "2️⃣ 語音聲控 🎙️：地圖內直接說「找 台北車站」免動手！\n"
+            "3️⃣ 計時尋車 🚙：精算停車費，一鍵導航回愛車身邊。\n"
+            "4️⃣ 智慧轉乘 🚲：自動精算 YouBike/捷運最快轉乘方案。\n\n"
+            "💡 請點擊左上角【開啟地圖】體驗！"
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
         return
 
-    # 🌟 核心功能 1：處理「查 ＋ 關鍵字」功能 (去資料庫撈詳細資料)
-    elif user_text.startswith("查 "):
-        keyword = user_text[1:].strip()
-        if not keyword:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="💡 請輸入要查詢的名稱，例如：「查 嘟嘟房」"))
-            return
+    # ==========================================
+    # 🌟 2. 根據使用者的「記憶狀態」執行對應搜尋
+    # ==========================================
+    current_state = user_states.get(user_id)
 
+    # 如果他在「查詳細資料模式」
+    if current_state == "waiting_for_query":
+        user_states.pop(user_id, None) # 查完就馬上忘記這個狀態，恢復成純聊天模式
+        keyword = user_text
         try:
             conn = get_db_connection()
             cursor = conn.cursor(dictionary=True)
@@ -420,57 +444,10 @@ def handle_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 查詢錯誤，請稍後再試。"))
         return
         
-    # 🟢 按鈕 D：預測教學
-    elif "預測" in user_text:
-        reply_msg = "🔮 【AI 預測教學】\n\n請點擊選單的「開啟地圖」，選擇您的目標停車場後，系統就會自動幫您預測 15 分鐘後抵達時會不會客滿喔！"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
-        return
-
-    # 🟢 按鈕 E：轉乘建議
-    elif "轉乘" in user_text or "決策" in user_text:
-        reply_msg = "🚲 【智慧轉乘建議】\n\n我們支援 YouBike 與捷運智慧轉乘決策！請在網頁地圖中點擊目標，系統將為您計算最省時的移動方式。"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
-        return
-
-    # 🟢 按鈕 F：使用說明
-    elif "說明" in user_text or "簡介" in user_text:
-        reply_msg = (
-            "👋 歡迎使用【智慧停車地圖系統】！\n\n"
-            "我們的網頁地圖搭載了最先進的技術，功能指南如下：\n\n"
-            "1️⃣ AI 預測與備案 🔮：點擊地圖「🅿️」開始導航，AI 將預測抵達時是否客滿，若客滿會自動彈出備用車位！\n"
-            "2️⃣ 語音聲控助理 🎙️：點選地圖麥克風，直接說「找 台北車站」免動手！\n"
-            "3️⃣ 計時尋車防超收 🚙：紀錄位置並精算停車費，支援一鍵導航回愛車身邊。\n"
-            "4️⃣ 智慧轉乘決策 🚲：自動精算 YouBike 或捷運的最快轉乘方案。\n"
-            "5️⃣ 條件智慧篩選 🎯：透過底部抽屜選單，可切換「距離最近」或「費率最便宜」。\n\n"
-            "💡 趕快點擊左上角的【開啟地圖】親自體驗吧！"
-        )
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
-        return
-        
-    # 🌟 核心功能 2：AI 總機智慧判斷 (聊天 or 找地點)
-    else:
+    # 如果他在「找車位模式」
+    elif current_state == "waiting_for_recommend":
+        user_states.pop(user_id, None) # 查完就馬上忘記這個狀態
         target_place = user_text
-        
-        # 🟢 第一關：先讓 AI 判斷意圖 (如果有設定金鑰)
-        if gemini_model:
-            try:
-                router_prompt = f"""
-                你現在是停車場系統的「AI 總機」。請判斷使用者輸入的這句話：「{user_text}」
-                1. 如果這句話看起來像是一個「地點、地標、建築物名稱」(例如：台北101、好市多、新莊體育館)，請你「只」回覆：SEARCH
-                2. 如果這句話是日常聊天、提問、笑話、或詢問系統功能，請你直接化身親切的「智慧停車小幫手」回答他的問題。
-                """
-                ai_response = gemini_model.generate_content(router_prompt)
-                ai_reply = ai_response.text.strip()
-                
-                # 如果 AI 判斷這是聊天，就直接回傳 AI 的回答並結束
-                if ai_reply != "SEARCH" and "SEARCH" not in ai_reply:
-                    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"🤖 {ai_reply}"))
-                    return
-            except Exception as e:
-                print(f"[ERROR] AI 總機判斷失敗: {e}")
-                # 如果 AI 剛好秀逗，就默默繼續往下走 Google 搜尋
-
-        # 🟢 第二關：如果 AI 判斷是地點 (或 AI 沒開)，就交給 Google 地圖搜尋
         try:
             GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
             if not GOOGLE_API_KEY:
@@ -488,7 +465,6 @@ def handle_message(event):
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"😢 找不到「{target_place}」的相關地標，請換個關鍵字試試。"))
                 return
 
-            # 如果 Google 有找到地點，就繼續「尋找附近車位」邏輯
             target_lat = res['results'][0]['geometry']['location']['lat']
             target_lng = res['results'][0]['geometry']['location']['lng']
             place_name = res['results'][0]['name']
@@ -520,10 +496,31 @@ def handle_message(event):
                 reply_msg = f"😢 【{place_name}】附近目前暫無空位資料。"
 
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
-            
         except Exception as e:
             print(f"[ERROR] 處理失敗: {e}")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 系統發生錯誤，請稍後再試。"))
+        return
+
+    # ==========================================
+    # 🌟 3. 例外處理：完全交給 AI 純聊天 (平時的預設狀態)
+    # ==========================================
+    if gemini_model:
+        try:
+            # 賦予 AI 系統人設，避免它亂回答
+            prompt = f"""
+            你現在是「智慧停車地圖」的專屬 AI 客服小幫手。
+            請用親切、活潑、簡潔的繁體中文回答使用者的問題。
+            如果使用者跟你打招呼（例如說你好），請熱情回應並簡單介紹這個系統可以幫忙找車位、預測客滿。
+            使用者的訊息是：「{user_text}」
+            """
+            ai_response = gemini_model.generate_content(prompt)
+            ai_reply_text = ai_response.text.strip()
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"🤖 {ai_reply_text}"))
+        except Exception as e:
+            print(f"AI 產生失敗: {e}")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="🤖 抱歉，我的 AI 腦袋剛好在重開機，請稍後再跟我聊天喔！"))
+    else:
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="💡 我是停車小幫手！您可以點擊下方選單的「目的地尋車」來找車位喔！"))
 
 # =========================================================
 # 🚀 伺服器啟動與背景排程
