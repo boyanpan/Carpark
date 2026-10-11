@@ -9,7 +9,7 @@ import random
 import requests
 import pandas as pd
 import mysql.connector
-from google import genai  # 🌟 換成最新一代的 Google GenAI 套件！
+from google import genai  # 🌟 最新一代的 Google GenAI 套件
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -476,16 +476,16 @@ def handle_message(event):
             如果使用者跟你打招呼（例如說你好），請熱情回應並簡單介紹這個系統可以幫忙找車位、預測客滿。
             使用者的訊息是：「{user_text}」
             """
-            # 使用最新穩定版模型
+            # 💡 已經直接為你指定 Google 官方要求的最新 3.8 版本
             response = gemini_client.models.generate_content(
-                model='gemini-2.5-flash',  # 🌟 換成目前 Google 最新且支援的模型
+                model='gemini-3.8-flash',
                 contents=prompt
             )
             ai_reply_text = response.text.strip()
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"🤖 {ai_reply_text}"))
         except Exception as e:
             print(f"AI 產生失敗: {e}")
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"錯誤代碼：\n{str(e)}"))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"🤖 抱歉，我的 AI 腦袋剛好在重開機，請稍後再試喔！"))
     else:
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="💡 我是停車小幫手！您可以點擊下方選單的「目的地尋車」來找車位喔！"))
 
