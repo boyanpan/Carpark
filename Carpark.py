@@ -9,7 +9,7 @@ import random
 import requests
 import pandas as pd
 import mysql.connector
-import google.generativeai as genai  # 🌟 引入 Gemini AI 套件
+from google import genai  # 🌟 換成最新一代的 Google GenAI 套件！
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -32,16 +32,13 @@ app = Flask(__name__, static_folder='car', static_url_path='/')
 line_bot_api = LineBotApi(os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', ''))
 handler = WebhookHandler(os.environ.get('LINE_CHANNEL_SECRET', ''))
 
-# 🌟 初始化 Gemini AI 模型
+# 🌟 初始化 Gemini AI 模型 (使用最新版 SDK)
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    ai_generation_config = {"temperature": 0.7}
-    # 👇 改成 gemini-pro
-    gemini_model = genai.GenerativeModel('gemini-pro', generation_config=ai_generation_config)
-    print("🤖 Gemini AI 助理大腦載入成功！")
+    gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+    print("🤖 最新版 Gemini AI 助理大腦載入成功！")
 else:
-    gemini_model = None
+    gemini_client = None
     print("⚠️ 尚未設定 GEMINI_API_KEY，AI 對話功能將不會啟用。")
 
 # 載入 AI 預測模型
@@ -69,9 +66,6 @@ DB_CONFIG = {
 URL_DESC = "https://tcgbusfs.blob.core.windows.net/blobtcmsv/TCMSV_alldesc.json"
 URL_AVAIL = "https://tcgbusfs.blob.core.windows.net/blobtcmsv/TCMSV_allavailable.json"
 TRANSFORMER = Transformer.from_crs("EPSG:3826", "EPSG:4326", always_xy=True)
-
-METRO_STATIONS = []
-METRO_LINES = {}
 
 def get_db_connection():
     return mysql.connector.connect(**DB_CONFIG)
@@ -118,15 +112,6 @@ def categorize_parking(name: str) -> str:
     if any(k in name for k in ['嘟嘟房', '台灣聯通', '應安', '車亭', '日月亭']): return '🅿️ 連鎖集團'
     return '一般停車場'
 
-def load_metro_data():
-    global METRO_STATIONS, METRO_LINES
-    try:
-        with open("metro_stations.json", "r", encoding="utf-8") as f:
-            METRO_STATIONS = json.load(f)
-        with open("metro_lines.json", "r", encoding="utf-8") as f:
-            METRO_LINES = json.load(f)
-    except: pass
-
 def sync_data_to_db():
     print("[INFO] 開始同步最新資料至雲端資料庫...")
     try:
@@ -167,9 +152,6 @@ def sync_data_to_db():
     except Exception as e:
         print(f"[ERROR] 資料同步失敗: {e}")
 
-# =========================================================
-# 🧠 智慧轉乘決策引擎 (核心商業邏輯)
-# =========================================================
 def calculate_best_transit_mode(distance: float, pure_walk_time: float, yb_data: dict = None, metro_data: dict = None) -> dict:
     best_mode = 'WALK'
     best_time = pure_walk_time
@@ -203,9 +185,6 @@ def calculate_best_transit_mode(distance: float, pure_walk_time: float, yb_data:
 
     return {"mode": best_mode, "total_time": int(best_time), "reason": recommendation_reason}
 
-# =========================================================
-# 🌐 API 路由區塊
-# =========================================================
 @app.route("/")
 def serve_index():
     return app.send_static_file('index.html')
@@ -297,9 +276,6 @@ def predict_and_recommend():
         }
     })
 
-# =========================================================
-# 🟢 LINE Bot Webhook 接收與處理區塊
-# =========================================================
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers.get('X-Line-Signature', '')
@@ -310,7 +286,6 @@ def callback():
         return 'Invalid signature', 400
     return 'OK'
 
-# 📍 處理使用者傳送的 GPS 定位
 @handler.add(MessageEvent, message=LocationMessage)
 def handle_location(event):
     user_lat = event.message.latitude
@@ -348,36 +323,31 @@ def handle_location(event):
         print(f"[ERROR] 定位搜尋失敗: {e}")
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 搜尋發生錯誤，請稍後再試。"))
 
-# 🧠 建立一個大腦記憶區，用來記住每個使用者現在正在做什麼
+# 🧠 建立一個大腦記憶區
 user_states = {}
 
-# 💬 處理使用者傳送的文字 (具備記憶功能的終極版)
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_text = event.message.text.strip()
-    user_id = event.source.user_id  # 抓取目前是哪位使用者在講話
+    user_id = event.source.user_id 
     
-    # ==========================================
-    # 🟢 1. 處理圖文選單的按鈕 (設定狀態)
-    # ==========================================
     if user_text in ["尋車", "推薦", "地標"]:
-        user_states[user_id] = "waiting_for_recommend" # 記住該使用者進入「找車位模式」
+        user_states[user_id] = "waiting_for_recommend"
         reply_msg = "📍 【目的地精準尋車】\n\n請直接輸入您想去的地點（例如：台北101、新莊體育館）：\n\n(若想退出此模式，請輸入「取消」)"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
         return
             
     elif user_text in ["查詢", "資訊", "附近"]:
-        user_states[user_id] = "waiting_for_query" # 記住該使用者進入「查詳細資料模式」
+        user_states[user_id] = "waiting_for_query"
         reply_msg = "🔎 【停車場詳細資訊查詢】\n\n請直接輸入停車場名稱（例如：嘟嘟房、體育館）：\n\n(若想退出此模式，請輸入「取消」)"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
         return
         
     elif user_text == "取消":
-        user_states.pop(user_id, None) # 清除記憶
+        user_states.pop(user_id, None)
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="✅ 已為您取消動作！現在您可以隨便跟我聊天囉。"))
         return
 
-    # 點擊其他按鈕時，自動清除先前的記憶，避免錯亂
     elif user_text in ["預測", "預測教學"]:
         user_states.pop(user_id, None)
         reply_msg = "🔮 【AI 預測教學】\n\n請點擊選單的「開啟地圖」，選擇目標停車場後，系統將自動預測抵達時是否客滿！"
@@ -403,14 +373,10 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
         return
 
-    # ==========================================
-    # 🌟 2. 根據使用者的「記憶狀態」執行對應搜尋
-    # ==========================================
     current_state = user_states.get(user_id)
 
-    # 如果他在「查詳細資料模式」
     if current_state == "waiting_for_query":
-        user_states.pop(user_id, None) # 查完就馬上忘記這個狀態，恢復成純聊天模式
+        user_states.pop(user_id, None)
         keyword = user_text
         try:
             conn = get_db_connection()
@@ -445,9 +411,8 @@ def handle_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 查詢錯誤，請稍後再試。"))
         return
         
-    # 如果他在「找車位模式」
     elif current_state == "waiting_for_recommend":
-        user_states.pop(user_id, None) # 查完就馬上忘記這個狀態
+        user_states.pop(user_id, None) 
         target_place = user_text
         try:
             GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
@@ -502,36 +467,32 @@ def handle_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 系統發生錯誤，請稍後再試。"))
         return
 
-    # ==========================================
-    # 🌟 3. 例外處理：完全交給 AI 純聊天 (平時的預設狀態)
-    # ==========================================
-    if gemini_model:
+    # 🌟 3. 全新 AI 對話引擎 (google-genai)
+    if gemini_client:
         try:
-            # 賦予 AI 系統人設，避免它亂回答
             prompt = f"""
             你現在是「智慧停車地圖」的專屬 AI 客服小幫手。
             請用親切、活潑、簡潔的繁體中文回答使用者的問題。
             如果使用者跟你打招呼（例如說你好），請熱情回應並簡單介紹這個系統可以幫忙找車位、預測客滿。
             使用者的訊息是：「{user_text}」
             """
-            ai_response = gemini_model.generate_content(prompt)
-            ai_reply_text = ai_response.text.strip()
+            # 使用最新穩定版模型
+            response = gemini_client.models.generate_content(
+                model='gemini-1.5-flash',
+                contents=prompt
+            )
+            ai_reply_text = response.text.strip()
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"🤖 {ai_reply_text}"))
         except Exception as e:
             print(f"AI 產生失敗: {e}")
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="🤖 抱歉，我的 AI 腦袋剛好在重開機，請稍後再跟我聊天喔！"))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"🤖 抓到兇手了！錯誤代碼是：\n{str(e)}"))
     else:
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="💡 我是停車小幫手！您可以點擊下方選單的「目的地尋車」來找車位喔！"))
 
-# =========================================================
-# 🚀 伺服器啟動與背景排程
-# =========================================================
 init_db()        
-load_metro_data()  
 
 scheduler = BackgroundScheduler(daemon=True)
 scheduler.add_job(func=sync_data_to_db, trigger='interval', minutes=3)
-# 延遲 3 秒執行第一次同步，避免伺服器開機超時
 scheduler.add_job(func=sync_data_to_db, trigger='date', run_date=datetime.datetime.now() + datetime.timedelta(seconds=3))
 scheduler.start()
 print("[INFO] ⏱️ 背景自動更新排程已啟動")
@@ -539,7 +500,6 @@ print("[INFO] ⏱️ 背景自動更新排程已啟動")
 if __name__ == "__main__":
     try:
         app.run(host='0.0.0.0', port=5000, debug=False) 
-    except Exception as e:
-            print(f"AI 產生失敗: {e}")
-            # 讓機器人直接在 LINE 裡面說出它到底遇到什麼錯誤！
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"🤖 抓到兇手了！錯誤代碼是：\n{str(e)}"))
+    except (KeyboardInterrupt, SystemExit):
+        scheduler.shutdown()
+        print("[INFO] 🛑 伺服器已關閉")
