@@ -37,7 +37,8 @@ GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
     ai_generation_config = {"temperature": 0.7}
-    gemini_model = genai.GenerativeModel('gemini-1.5-flash', generation_config=ai_generation_config)
+    # 👇 改成 gemini-pro
+    gemini_model = genai.GenerativeModel('gemini-pro', generation_config=ai_generation_config)
     print("🤖 Gemini AI 助理大腦載入成功！")
 else:
     gemini_model = None
