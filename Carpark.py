@@ -539,6 +539,7 @@ print("[INFO] ⏱️ 背景自動更新排程已啟動")
 if __name__ == "__main__":
     try:
         app.run(host='0.0.0.0', port=5000, debug=False) 
-    except (KeyboardInterrupt, SystemExit):
-        scheduler.shutdown()
-        print("[INFO] 🛑 伺服器已關閉")
+    except Exception as e:
+            print(f"AI 產生失敗: {e}")
+            # 讓機器人直接在 LINE 裡面說出它到底遇到什麼錯誤！
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"🤖 抓到兇手了！錯誤代碼是：\n{str(e)}"))
