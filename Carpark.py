@@ -9,7 +9,7 @@ import random
 import requests
 import pandas as pd
 import mysql.connector
-import google.generativeai as genai  # 🌟 新增 Gemini AI 套件
+import google.generativeai as genai  # 🌟 引入 Gemini AI 套件
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -309,7 +309,7 @@ def callback():
         return 'Invalid signature', 400
     return 'OK'
 
-# 📍 處理使用者傳送的 GPS 定位 (保留給原生 LINE 傳送位置使用)
+# 📍 處理使用者傳送的 GPS 定位
 @handler.add(MessageEvent, message=LocationMessage)
 def handle_location(event):
     user_lat = event.message.latitude
@@ -347,12 +347,12 @@ def handle_location(event):
         print(f"[ERROR] 定位搜尋失敗: {e}")
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 搜尋發生錯誤，請稍後再試。"))
 
-# 💬 處理使用者傳送的文字 (對應圖文選單的按鈕 & 雙引擎搜尋)
+# 💬 處理使用者傳送的文字
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_text = event.message.text.strip()
     
-    # 🟢 按鈕 B：目的地尋車教學 (教學文字已拿掉「找」字)
+    # 🟢 按鈕 B：目的地尋車教學
     if "推薦" in user_text or "尋車" in user_text or "地標" in user_text:
         reply_msg = (
             "📍 【目的地精準尋車】\n\n"
@@ -447,16 +447,36 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
         return
         
-    # 🌟 核心功能 2：雙引擎自動判斷 (找地點 or AI 聊天)
+    # 🌟 核心功能 2：AI 總機智慧判斷 (聊天 or 找地點)
     else:
         target_place = user_text
+        
+        # 🟢 第一關：先讓 AI 判斷意圖 (如果有設定金鑰)
+        if gemini_model:
+            try:
+                router_prompt = f"""
+                你現在是停車場系統的「AI 總機」。請判斷使用者輸入的這句話：「{user_text}」
+                1. 如果這句話看起來像是一個「地點、地標、建築物名稱」(例如：台北101、好市多、新莊體育館)，請你「只」回覆：SEARCH
+                2. 如果這句話是日常聊天、提問、笑話、或詢問系統功能，請你直接化身親切的「智慧停車小幫手」回答他的問題。
+                """
+                ai_response = gemini_model.generate_content(router_prompt)
+                ai_reply = ai_response.text.strip()
+                
+                # 如果 AI 判斷這是聊天，就直接回傳 AI 的回答並結束
+                if ai_reply != "SEARCH" and "SEARCH" not in ai_reply:
+                    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"🤖 {ai_reply}"))
+                    return
+            except Exception as e:
+                print(f"[ERROR] AI 總機判斷失敗: {e}")
+                # 如果 AI 剛好秀逗，就默默繼續往下走 Google 搜尋
+
+        # 🟢 第二關：如果 AI 判斷是地點 (或 AI 沒開)，就交給 Google 地圖搜尋
         try:
             GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
             if not GOOGLE_API_KEY:
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 系統缺少 Google API 金鑰。"))
                 return
 
-            # 先請 Google 地圖判定這是不是一個「地點」
             url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
             params = {
                 'query': target_place, 'location': '25.0339,121.5644', 'radius': '20000',
@@ -464,25 +484,8 @@ def handle_message(event):
             }
             res = requests.get(url, params=params).json()
 
-            # 💡 如果 Google 找不到地點，代表使用者在跟機器人「聊天」 -> 無縫轉交 AI！
             if not res.get('results'):
-                if gemini_model:
-                    try:
-                        # 賦予 AI 系統人設
-                        prompt = f"""
-                        你現在是「智慧停車地圖」的專屬 AI 客服小幫手。
-                        請用親切、簡短、活潑的繁體中文回答使用者的問題。
-                        如果使用者問到非停車的問題，也可以幽默地回應。
-                        使用者的訊息是：「{target_place}」
-                        """
-                        ai_response = gemini_model.generate_content(prompt)
-                        ai_reply_text = ai_response.text.strip()
-                        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"🤖 {ai_reply_text}"))
-                    except Exception as e:
-                        print(f"AI 產生失敗: {e}")
-                        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="😢 找不到這個地點，而且我的 AI 腦袋剛好當機了..."))
-                else:
-                    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"😢 找不到「{target_place}」的相關地標，請換個關鍵字試試。"))
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"😢 找不到「{target_place}」的相關地標，請換個關鍵字試試。"))
                 return
 
             # 如果 Google 有找到地點，就繼續「尋找附近車位」邏輯
