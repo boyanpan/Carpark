@@ -1,5 +1,5 @@
 /* 全域與重置 */
-html, body { height: 100vh; width: 100vw; margin: 0; padding: 0; }
+html, body { height: 100vh; height: 100dvh; width: 100vw; margin: 0; padding: 0; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .leaflet-routing-container { display: none !important; }
 
@@ -232,4 +232,52 @@ html, body { height: 100vh; width: 100vw; margin: 0; padding: 0; }
 
 #switch-route-btn:active {
     background: #27ae60;
+}
+
+/* ===== 手機橫向版型：左側欄 + 右側地圖 ===== */
+@media (orientation: landscape) and (max-height: 500px) {
+    #ui-container { flex-direction: row !important; }
+
+    #sidebar-wrapper {
+        width: min(380px, 46vw) !important;
+        height: 100% !important;
+        background: #fffdfb;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        pointer-events: auto;
+        border-right: 1px solid #e6dfd5;
+        box-shadow: 6px 0 30px rgba(43,34,27,0.08);
+        padding-left: env(safe-area-inset-left);
+        transition: transform 0.3s ease;
+        -webkit-overflow-scrolling: touch;
+    }
+    /* 隱藏手機版專用的空白撐高層 */
+    #sidebar-wrapper > .pointer-events-none { display: none !important; }
+
+    #search-panel {
+        padding: 8px 10px !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        transform: none !important;
+    }
+    #search-panel h1 { font-size: 16px; }
+
+    /* 底部抽屜 → 直接接在搜尋區下方，整欄一起捲動 */
+    #bottom-sheet {
+        height: auto !important;
+        min-height: 0 !important;
+        flex: none !important;
+        transform: none !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        overflow: visible !important;
+    }
+    #drag-handle { display: none !important; }
+    #bottom-sheet > div:nth-child(2) { position: sticky; top: 0; z-index: 5; }
+    #content-list { overflow: visible !important; padding-bottom: 16px !important; }
+
+    /* 導航列、按鈕、AI 面板縮小 */
+    #nav-header { padding: 6px 10px !important; padding-left: calc(10px + env(safe-area-inset-left)); }
+    #recenter-btn { bottom: 16px !important; right: calc(12px + env(safe-area-inset-right)) !important; }
+    #ai-recommendation-panel { top: 8px; max-width: 360px; }
 }

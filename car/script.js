@@ -29,7 +29,46 @@ const dragHandle = document.getElementById('drag-handle');
 const sheetArrow = document.getElementById('sheet-arrow');
 let startY = 0, currentHeight = 0, isSheetExpanded = false; 
 
-if (window.innerWidth < 768 && bottomSheet) bottomSheet.style.height = '35vh';
+// 橫向手機（矮螢幕）判斷
+function isLandscapePhone() {
+    return window.matchMedia('(orientation: landscape) and (max-height: 500px)').matches;
+}
+// 只有「直式小螢幕」才使用底部抽屜
+function isSheetMode() {
+    return window.innerWidth < 768 && !isLandscapePhone();
+}
+
+// 導航時隱藏 / 還原介面（三種版型各自處理）
+function setUIHidden(hidden) {
+    if (isSheetMode()) {
+        if (searchPanel) searchPanel.style.transform = hidden ? 'translateY(-100%)' : 'translateY(0)';
+        if (bottomSheet) bottomSheet.style.transform = hidden ? 'translateY(100%)' : 'translateY(0)';
+    } else if (isLandscapePhone()) {
+        const sb = document.getElementById('sidebar-wrapper');
+        if (sb) sb.style.transform = hidden ? 'translateX(-100%)' : '';
+    }
+}
+
+// 旋轉 / 縮放時重設版型
+function applyLayout() {
+    const sb = document.getElementById('sidebar-wrapper');
+    if (sb) sb.style.transform = '';
+    if (isSheetMode()) {
+        if (bottomSheet) {
+            bottomSheet.style.height = isSheetExpanded ? '85vh' : '35vh';
+            bottomSheet.style.transform = isNavigating ? 'translateY(100%)' : 'translateY(0)';
+        }
+        if (searchPanel) searchPanel.style.transform = isNavigating ? 'translateY(-100%)' : 'translateY(0)';
+    } else {
+        if (bottomSheet) { bottomSheet.style.height = ''; bottomSheet.style.transform = ''; }
+        if (searchPanel) searchPanel.style.transform = '';
+        if (isLandscapePhone() && isNavigating && sb) sb.style.transform = 'translateX(-100%)';
+    }
+    if (typeof google !== 'undefined' && map) google.maps.event.trigger(map, 'resize');
+}
+window.addEventListener('resize', applyLayout);
+window.addEventListener('orientationchange', () => setTimeout(applyLayout, 300));
+applyLayout();
 
 // 🚀 Google Maps 初始化主函式 (等待 API 載入後自動觸發)
 window.onload = function() {
@@ -37,13 +76,12 @@ window.onload = function() {
 };
 
 function initGoogleMap() {
-    map = new google.maps.Map(document.getElementById("map"), {
-        center: { lat: 25.0339, lng: 121.5644 },
-        zoom: 14,
-        mapId: "DEMO_MAP_ID", 
-        disableDefaultUI: true, 
-        zoomControl: false,
-    });
+    map.addListener('dragstart', () => {
+    if (isSheetMode() && !isNavigating) setUIHidden(true);
+});
+map.addListener('dragend', () => {
+    if (isSheetMode() && !isNavigating) setUIHidden(false);
+});
 
     infoWindow = new google.maps.InfoWindow();
 
@@ -83,7 +121,8 @@ function initGoogleMap() {
 // 2. 行動端行動抽屜 (Bottom Sheet) 拖曳邏輯
 // ==========================================
 window.toggleBottomSheet = function() {
-    if (window.innerWidth >= 768 || !bottomSheet) return;
+    // toggleBottomSheet
+    if (!isSheetMode() || !bottomSheet) return;
     isSheetExpanded = !isSheetExpanded;
     if (isSheetExpanded) {
         bottomSheet.style.height = '85vh';
@@ -95,7 +134,7 @@ window.toggleBottomSheet = function() {
 };
 
 function collapseBottomSheet() {
-    if (window.innerWidth < 768 && bottomSheet) {
+    if (isSheetMode() && bottomSheet) {
         bottomSheet.style.transition = 'height 0.4s cubic-bezier(0.25, 1, 0.5, 1)';
         bottomSheet.style.height = '35vh';
         isSheetExpanded = false;
@@ -497,7 +536,7 @@ window.highlightCardInList = function(id) {
         document.querySelectorAll('.parking-card').forEach(card => card.classList.remove('top-card'));
         targetCard.classList.add('top-card');
         targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        if (window.innerWidth < 768 && !isSheetExpanded) {
+        if (isSheetMode() && !isSheetExpanded) {
             toggleBottomSheet();
         }
     }
@@ -709,10 +748,7 @@ window.startNav = function(itemStr) {
     
     const navHeader = document.getElementById('nav-header');
     if (navHeader) navHeader.classList.add('active');
-    if (window.innerWidth < 768) {
-        if (searchPanel) searchPanel.style.transform = 'translateY(-100%)';
-        if (bottomSheet) bottomSheet.style.transform = 'translateY(100%)';
-    }
+    setUIHidden(true);
     
     if (infoWindow) infoWindow.close();
 
@@ -774,10 +810,7 @@ window.stopNavigation = function() {
     currentDestination = null;
     const navHeader = document.getElementById('nav-header');
     if (navHeader) navHeader.classList.remove('active');
-    if (window.innerWidth < 768) {
-        if (searchPanel) searchPanel.style.transform = 'translateY(0)';
-        if (bottomSheet) bottomSheet.style.transform = 'translateY(0)';
-    }
+    setUIHidden(false);
     
     directionsRenderer.setDirections({routes: []});
     
