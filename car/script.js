@@ -1,7 +1,16 @@
 // ==========================================
-// Proj4 座標定義
+// 0. 小工具（HTML 跳脫、車位狀態）
 // ==========================================
-proj4.defs("EPSG:3826", "+proj=tmerc +lat_0=0 +lon_0=121 +k=0.9999 +x_0=250000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs");
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// 單一來源決定顏色狀態：ok 充足 / low 偏少 / full 已滿 / nodata 無資料
+function availState(a) {
+    if (a < 0) return 'nodata';
+    if (a === 0) return 'full';
+    return a <= 10 ? 'low' : 'ok';
+}
+const STATE_TEXT = { ok: '空位', low: '空位少', full: '已滿', nodata: '無資料' };
 
 // ==========================================
 // 1. 初始化地圖與全域變數 (Google Maps 完整版)
@@ -70,42 +79,60 @@ window.addEventListener('resize', applyLayout);
 window.addEventListener('orientationchange', () => setTimeout(applyLayout, 300));
 applyLayout();
 
+// 抽屜展開時隱藏「回到我的位置」按鈕，避免蓋住清單
+if (bottomSheet && window.ResizeObserver) {
+    new ResizeObserver(() => {
+        const open = isSheetMode() && bottomSheet.getBoundingClientRect().height > window.innerHeight * 0.6;
+        document.body.classList.toggle('sheet-open', open);
+    }).observe(bottomSheet);
+}
+
 // 🚀 Google Maps 初始化主函式 (等待 API 載入後自動觸發)
 window.onload = function() {
+    if (typeof google === 'undefined' || !google.maps) {
+        const listEl = document.getElementById('content-list');
+        if (listEl) listEl.innerHTML = `<div class="pk-empty">Google 地圖載入失敗<br><small>請檢查 API Key 與網路連線</small></div>`;
+        return;
+    }
     initGoogleMap();
 };
 
-function initGoogleMap() {
-    map.addListener('dragstart', () => {
-    if (isSheetMode() && !isNavigating) setUIHidden(true);
-});
-map.addListener('dragend', () => {
-    if (isSheetMode() && !isNavigating) setUIHidden(false);
-});
+async function initGoogleMap() {
+    // ★ 原本最大的 bug：整份程式從來沒有建立 map
+    const { Map } = await google.maps.importLibrary('maps');
+    await google.maps.importLibrary('marker');
+    await google.maps.importLibrary('places');
 
-    infoWindow = new google.maps.InfoWindow();
+    map = new Map(document.getElementById('map'), {
+        center: { lat: 25.0478, lng: 121.5170 },
+        zoom: 14,
+        mapId: 'DEMO_MAP_ID',      // AdvancedMarker 一定要 mapId；正式上線換成你自己的
+        disableDefaultUI: true,
+        gestureHandling: 'greedy',
+        clickableIcons: false
+    });
+
+    infoWindow = new google.maps.InfoWindow({ maxWidth: 300 });
 
     directionsService = new google.maps.DirectionsService();
     directionsRenderer = new google.maps.DirectionsRenderer({
         map: map,
         suppressMarkers: true,
-        polylineOptions: { strokeColor: '#1b2a47', strokeWeight: 8, strokeOpacity: 0.8 }
+        polylineOptions: { strokeColor: '#2563eb', strokeWeight: 7, strokeOpacity: 0.9 }
     });
 
-    map.addListener('dragstart', () => {
-        if (window.innerWidth < 768 && !isNavigating) {
-            if (searchPanel) searchPanel.style.transform = 'translateY(-100%)';
-            if (bottomSheet) bottomSheet.style.transform = 'translateY(100%)';
-        }
-    });
-    map.addListener('dragend', () => {
-        if (window.innerWidth < 768 && !isNavigating) {
-            if (searchPanel) searchPanel.style.transform = 'translateY(0)';
-            if (bottomSheet) bottomSheet.style.transform = 'translateY(0)';
-        }
-    });
+    // 只留一組拖曳監聽（原本有兩組互相打架）
+    map.addListener('dragstart', () => { if (isSheetMode() && !isNavigating) setUIHidden(true); });
+    map.addListener('dragend',   () => { if (isSheetMode() && !isNavigating) setUIHidden(false); });
 
-    initCompass();
+    // iOS 的羅盤權限必須在「使用者點擊」時才能要
+    if (typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function') {
+        document.addEventListener('click', initCompass, { once: true });
+    } else {
+        initCompass();
+    }
+
     initGPS();
     initAutocomplete();
     fetchTaipeiParkingData();
@@ -121,7 +148,6 @@ map.addListener('dragend', () => {
 // 2. 行動端行動抽屜 (Bottom Sheet) 拖曳邏輯
 // ==========================================
 window.toggleBottomSheet = function() {
-    // toggleBottomSheet
     if (!isSheetMode() || !bottomSheet) return;
     isSheetExpanded = !isSheetExpanded;
     if (isSheetExpanded) {
@@ -202,17 +228,22 @@ function handleOrientation(event) {
     }
 }
 
+// 原本 absolute 與一般事件同時監聽，Android 方向會亂跳；改成只擇一監聽
+let compassStarted = false;
 function initCompass() {
-    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-        DeviceOrientationEvent.requestPermission()
-            .then(permissionState => {
-                if (permissionState === 'granted') {
-                    window.addEventListener('deviceorientation', handleOrientation);
-                }
-            }).catch(console.error);
+    if (compassStarted) return;
+    const DOE = window.DeviceOrientationEvent;
+    if (DOE && typeof DOE.requestPermission === 'function') {
+        DOE.requestPermission().then(s => {
+            if (s === 'granted') {
+                compassStarted = true;
+                window.addEventListener('deviceorientation', handleOrientation, true);
+            }
+        }).catch(() => {});
     } else {
-        window.addEventListener('deviceorientationabsolute', handleOrientation);
-        window.addEventListener('deviceorientation', handleOrientation);
+        compassStarted = true;
+        const evt = ('ondeviceorientationabsolute' in window) ? 'deviceorientationabsolute' : 'deviceorientation';
+        window.addEventListener(evt, handleOrientation, true);
     }
 }
 
@@ -224,7 +255,16 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 }
 
 function initGPS() {
-    if (!navigator.geolocation) return;
+    const gpsDot = document.getElementById('gps-dot');
+    const setDot = (c) => { if (gpsDot) gpsDot.className = `w-2 h-2 rounded-full ${c}`; };
+
+    // 手機上非 HTTPS（且不是 localhost）時，瀏覽器會直接禁止定位
+    if (!navigator.geolocation || !window.isSecureContext) {
+        console.warn("定位需要 HTTPS 或 localhost");
+        setDot('bg-red-500');
+        return;
+    }
+
     navigator.geolocation.watchPosition(
         (pos) => {
             const { latitude, longitude, heading } = pos.coords;
@@ -240,41 +280,34 @@ function initGPS() {
             }
             previousLocation = [latitude, longitude];
 
-            const carIconHtml = document.createElement('div');
-            carIconHtml.className = 'car-marker-container';
-            carIconHtml.style.transform = `rotate(${currentHeading}deg)`;
-            carIconHtml.innerHTML = `<div class="car-marker" style="font-size: 24px;">🚘</div>`;
-
+            const position = { lat: latitude, lng: longitude };
             if (!userMarker) {
-                userMarker = new google.maps.marker.AdvancedMarkerElement({
-                    map: map,
-                    position: { lat: latitude, lng: longitude },
-                    content: carIconHtml
-                });
+                const el = document.createElement('div');
+                el.className = 'me-marker';
+                el.innerHTML = '<svg viewBox="0 0 40 40" width="40" height="40"><circle cx="20" cy="20" r="16" fill="rgba(37,99,235,.18)"/><path d="M20 6 L28 28 L20 23 L12 28 Z" fill="#2563eb" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>';
+                userMarker = new google.maps.marker.AdvancedMarkerElement({ map, position, content: el, zIndex: 999 });
             } else { 
-                userMarker.position = { lat: latitude, lng: longitude };
-                updateCarIcon();
+                userMarker.position = position;
             }
-
-            const gpsDot = document.getElementById('gps-dot');
-            if (gpsDot) gpsDot.className = "w-2 h-2 bg-green-500 rounded-full shadow-[0_0_8px_#22c55e]";
+            updateCarIcon();
+            setDot('bg-green-500 shadow-[0_0_8px_#22c55e]');
 
             if (isFirst && !searchedLocation && !window.currentKeyword) { 
                 handleFilter(); 
-                map.panTo({ lat: latitude, lng: longitude });
+                map.panTo(position);
                 map.setZoom(15);
             }
             if (isNavigating) {
-                map.panTo({ lat: latitude, lng: longitude });
+                map.panTo(position);
                 map.setZoom(18);
             }
         },
         (err) => { 
-            console.warn("GPS 定位取得失敗:", err.message);
-            const gpsDot = document.getElementById('gps-dot');
-            if (gpsDot) gpsDot.className = "w-2 h-2 bg-red-500 rounded-full";
+            console.warn("GPS 定位取得失敗:", err.code, err.message);
+            setDot('bg-red-500');
+            if (err.code === 1) alert("定位權限被拒絕，請到瀏覽器網站設定中允許「位置」。");
         },
-        { enableHighAccuracy: true, maximumAge: 2000 }
+        { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 }
     );
 }
 
@@ -379,7 +412,7 @@ async function fetchTaipeiParkingData() {
     } catch (err) {
         console.error("雲端資料讀取失敗:", err);
         const listEl = document.getElementById('content-list');
-        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">無法連接雲端伺服器<br><span class="text-xs font-normal text-slate-400">請確認後端是否在正常運作 (${API_BASE_URL})</span></div>`;
+        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">無法連接雲端伺服器<br><span class="text-xs font-normal text-slate-400">請確認後端是否在正常運作 (${esc(API_BASE_URL)})</span></div>`;
     }
 }
 
@@ -424,7 +457,7 @@ async function searchLocation() {
     }
 
     window.currentKeyword = null;
-    if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">🌍 正在 Google 地圖搜尋「${rawQuery}」...</div>`;
+    if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">🌍 正在 Google 地圖搜尋「${esc(rawQuery)}」...</div>`;
     
     try {
         const data = await fetchGooglePlacesFromBackend(rawQuery);
@@ -435,7 +468,7 @@ async function searchLocation() {
             
             fetchTaipeiParkingData(); 
         } else {
-            if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">找不到「${rawQuery}」<br><span class="text-xs text-slate-400">請嘗試輸入更具體的名稱</span></div>`;
+            if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">找不到「${esc(rawQuery)}」<br><span class="text-xs text-slate-400">請嘗試輸入更具體的名稱</span></div>`;
         }
     } catch (err) { 
         if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500">搜尋失敗，請稍後再試</div>`;
@@ -542,44 +575,24 @@ window.highlightCardInList = function(id) {
     }
 };
 
+// 地圖彈窗
 function openMarkerPopup(item, marker) {
-    const safeItemStr = encodeURIComponent(JSON.stringify(item));
-    const buildRow = (icon, label, d) => {
-        if(d.t <= 0) return '';
-        const isNoData = d.a < 0;
-        if (isNoData) {
-            return `<div class="flex justify-between items-center border-b border-stone-100 py-1.5 last:border-0">
-                        <span class="text-stone-600 font-bold text-xs flex items-center gap-1.5"><span class="text-sm">${icon}</span> ${label}</span>
-                        <span class="font-mono text-xs"><span class="font-black text-stone-400">共 ${d.t} 位</span> <span class="text-stone-400 text-[10px] ml-1">(無即時資料)</span></span>
-                    </div>`;
-        } else {
-            const textCol = d.a <= 0 ? 'text-[#e11d48]' : 'text-[#0d9488]';
-            return `<div class="flex justify-between items-center border-b border-stone-100 py-1.5 last:border-0">
-                        <span class="text-stone-600 font-bold text-xs flex items-center gap-1.5"><span class="text-sm">${icon}</span> ${label}</span>
-                        <span class="font-mono text-xs"><span class="font-black ${textCol}">${d.a}</span> <span class="text-stone-400 font-medium">/ ${d.t}</span></span>
-                    </div>`;
-        }
-    };
-    const popupHtml = `
-        <div class="p-3.5 min-w-[240px] bg-[#fffdfb] font-sans">
-            <div class="flex justify-between items-start mb-1 pr-4">
-                <h3 class="font-black text-base text-[#1b2a47] leading-tight font-serif">${item.name}</h3>
+    const state = availState(item.car.a);
+    const navArg = encodeURIComponent(JSON.stringify(item));
+    const html = `
+        <div class="pk-pop">
+            <div class="pk-pop-head is-${state}">
+                <strong>${state === 'nodata' ? '—' : item.car.a}</strong>
+                <span>${STATE_TEXT[state]}<br><em>共 ${item.car.t} 位</em></span>
             </div>
-            <span class="inline-block text-[9px] bg-[#f4ece1] text-[#7c664e] px-1.5 py-0.5 rounded-md font-bold mb-2 border border-[#dcd1c0]/40">${item.category}</span>
-            <p class="text-[10px] text-stone-500 mb-2 flex items-center gap-1 font-medium">📍 ${item.address}</p>
-            <div class="bg-[#fbf9f6] rounded-xl px-2.5 border border-[#e6dfd5] mb-2 shadow-inner">
-                ${buildRow('🚗', '汽車', item.car)}
-            </div>
-            <div class="bg-[#fffbeb] text-[#b45309] text-[10px] font-bold p-2.5 rounded-xl border border-[#fef3c7] mb-2 text-center shadow-sm">🤖 ${item.prediction}</div>
+            <h3>${esc(item.name)}</h3>
+            <p class="pk-sub">${esc(item.category)}</p>
+            <p class="pk-addr">${esc(item.address)}</p>
+            <p class="pk-price">${esc(item.payex)}</p>
             ${buildSmartTransitBadge(item)}
-            <div class="text-stone-700 text-[10px] bg-[#fbf9f6] p-2.5 rounded-xl border border-[#e6dfd5] leading-relaxed whitespace-pre-line shadow-sm max-h-[120px] overflow-y-auto mt-2 mb-3">💰 ${item.payex}</div>
-            
-            <button onclick="startNav('${safeItemStr}')" class="w-full bg-[#1b2a47] hover:bg-[#2c3e60] text-[#fdfbf7] py-2.5 rounded-xl text-xs font-black shadow-md active:scale-95 transition flex items-center justify-center gap-1.5 border-none outline-none cursor-pointer">
-                🧭 開始導航
-            </button>
-        </div>
-    `;
-    infoWindow.setContent(popupHtml);
+            <button class="pk-go pk-go-wide" onclick="startNav('${navArg}')">開始導航</button>
+        </div>`;
+    infoWindow.setContent(html);
     infoWindow.open(map, marker);
 }
 
@@ -587,28 +600,19 @@ function openMarkerPopup(item, marker) {
 // 7. 更新地圖標記與 Popup 視窗
 // ==========================================
 function renderMapMarkers(data) {
-    if (markerCluster) markerCluster.clearMarkers();
-    Object.values(window.markersMap).forEach(m => m.map = null);
+    Object.values(window.markersMap).forEach(m => (m.map = null));
     window.markersMap = {}; 
-    const markers = [];
-    
-    data.forEach(item => {
-        const isFull = item.car.a === 0;
-        const color = item.car.a < 0 ? '#1b2a47' : (isFull ? '#e11d48' : (item.car.a <= 10 ? '#d97706' : '#0d9488'));
-        const displayNum = item.car.a < 0 ? 'P' : item.car.a;
 
-        const textStr = String(displayNum);
-        let iconWidth = 24;        
-        if (textStr.length === 2) iconWidth = 30; 
-        if (textStr.length >= 3) iconWidth = 38;  
+    const markers = data.map(item => {
+        const state = availState(item.car.a);
+        const el = document.createElement('div');
+        el.className = `pk-pin is-${state}`;
+        el.textContent = state === 'nodata' ? 'P' : item.car.a;
 
-        const markerContent = document.createElement('div');
-        markerContent.innerHTML = `<div style="background-color: ${color}; color: #fdfbf7; font-weight: 800; font-size: 11px; width: ${iconWidth}px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 10px; box-shadow: 0 3px 8px rgba(43,34,27,0.25); border: 2px solid #fffdfb; box-sizing: border-box; white-space: nowrap;">${displayNum}</div>`;
-
+        // 不自己帶 map，交給 clusterer 管理（原本會重複加進地圖）
         const marker = new google.maps.marker.AdvancedMarkerElement({
-            map: map,
             position: { lat: item.lat, lng: item.lng },
-            content: markerContent,
+            content: el,
             title: item.name
         });
 
@@ -618,10 +622,13 @@ function renderMapMarkers(data) {
         });
 
         window.markersMap[item.id] = marker;
-        markers.push(marker);
+        return marker;
     });
 
-    markerCluster = new markerClusterer.MarkerClusterer({ map, markers });
+    // clusterer 只建一次
+    if (!markerCluster) markerCluster = new markerClusterer.MarkerClusterer({ map, markers: [] });
+    markerCluster.clearMarkers();
+    markerCluster.addMarkers(markers);
 }
 
 // ==========================================
@@ -630,51 +637,43 @@ function renderMapMarkers(data) {
 function renderList(data, isUsingDest) {
     const listEl = document.getElementById('content-list');
     if (!listEl) return;
-    if (!data.length) return listEl.innerHTML = `<div class="text-center py-20 text-stone-400 font-bold font-serif">範圍內查無停車場 📖</div>`;
-    listEl.innerHTML = "";
-    
-    data.forEach((item, index) => {
-        const isFull = item.car.a === 0, hasNoData = item.car.a < 0;
-        const colorClass = hasNoData ? 'bg-[#1b2a47] text-[#fdfbf7]' : (isFull ? 'bg-[#e11d48] text-white' : 'bg-[#0d9488] text-white');
+    if (!data.length) {
+        listEl.innerHTML = `<div class="pk-empty">這個範圍內沒有停車場<br><small>試著加大搜尋半徑</small></div>`;
+        return;
+    }
+
+    listEl.innerHTML = data.map((item, index) => {
+        const state = availState(item.car.a);
+        const isTop = index === 0 && state !== 'full' && state !== 'nodata';
         const isFav = favorites.includes(item.id);
-        const distStr = item.distance ? `${item.distance.toFixed(2)} km` : "計算中";
-        const distLabel = isUsingDest ? "📍 距目的地:" : "📍 距您目前:";
-        const isTopPick = (index === 0 && !isFull && !hasNoData);
-        const badgeLabelText = (currentSortMode === 'price') ? '💰 最便宜' : '🎯 距離最近';
-        const safeItemStr = encodeURIComponent(JSON.stringify(item));
+        const distLabel = isUsingDest ? '距目的地' : '距目前位置';
+        const dist = item.distance != null ? `${item.distance.toFixed(2)} km` : '';
+        const navArg = encodeURIComponent(JSON.stringify(item));
+        const big = state === 'nodata' ? 'P' : item.car.a;
+        const id = esc(item.id);
 
-        const carStatusHtml = hasNoData 
-            ? `共 ${item.car.t} 位 <span class="text-[9px] font-normal ml-0.5">(無即時資料)</span>`
-            : `${item.car.a}/${item.car.t}`;
-
-        listEl.innerHTML += `
-            <div id="card-${item.id}" class="parking-card p-4 bg-[#fffdfb] border border-[#e6dfd5] rounded-2xl shadow-sm transition-all duration-300 ${isTopPick ? 'top-card' : ''}">
-                <div class="flex justify-between items-stretch">
-                    <div class="cursor-pointer flex-1 pr-2" onclick="selectCard('${item.id}', ${item.lat}, ${item.lng})">
-                        <div class="flex items-center gap-2 mb-1.5">
-                            <h3 class="font-black text-stone-800 leading-tight text-sm">${item.name}</h3>
-                            <span class="text-[9px] bg-[#f4ece1] text-[#7c664e] px-1.5 py-0.5 rounded-md font-bold">${item.category}</span>
-                            ${isTopPick ? `<span class="recommend-badge shrink-0">${badgeLabelText}</span>` : ''}
-                        </div>
-                        <p class="text-[10px] text-stone-400 mb-2 truncate">📍 ${item.address}</p>
-                        <div class="bg-[#fffbeb] text-[#b45309] text-[10px] font-bold px-2 py-0.5 rounded-md mb-2 inline-block shadow-sm border border-[#fef3c7]">🤖 ${item.prediction}</div>
-                        <div class="flex flex-wrap gap-1 mb-2">
-                            <span class="text-[10px] font-bold px-2 py-1 rounded-lg shadow-sm flex items-center gap-1 ${colorClass}">🚗 汽車 <span class="opacity-95">${carStatusHtml}</span></span>
-                        </div>
-                        <p class="text-[10px] text-[#1b2a47] font-bold font-mono bg-[#f4ece1]/50 inline-block px-2 py-0.5 rounded-md">${distLabel} ${distStr}</p>
-                        ${buildSmartTransitBadge(item)}
-                    </div>
-                    <div class="flex flex-col items-center justify-between shrink-0 border-l border-[#e6dfd5]/60 pl-3 ml-1">
-                        <button onclick="toggleFav('${item.id}')" class="text-xl active:scale-75 transition pt-1" title="加入/移除收藏">${isFav ? '🩷' : '🤍'}</button>
-                        <button onclick="startNav('${safeItemStr}')" class="bg-[#1b2a47] hover:bg-[#2c3e60] text-[#fdfbf7] px-3 py-2 rounded-xl text-[11px] font-black shadow-md active:scale-95 transition flex flex-col items-center gap-1 mt-3 border-none outline-none">
-                            <span class="text-sm leading-none">🧭</span> 導航
-                        </button>
-                        <a href="https://www.google.com/maps/search/?api=1&query=${item.lat},${item.lng}" target="_blank" class="bg-[#0d9488] hover:bg-[#115e59] text-[#fdfbf7] px-2 py-1.5 rounded-xl text-[10px] font-black shadow-md active:scale-95 transition flex items-center gap-1 mt-2 text-center no-underline" title="開啟地圖">
-                        🗺️ Google
-                        </a>
-                    </div>
-            </div>`;
-    });
+        return `
+        <article id="card-${id}" class="parking-card pk-card is-${state} ${isTop ? 'top-card' : ''}">
+            <button class="pk-avail" onclick="selectCard('${id}', ${item.lat}, ${item.lng})" aria-label="在地圖上查看 ${esc(item.name)}">
+                <strong>${big}</strong>
+                <span>${STATE_TEXT[state]}</span>
+                <em>共 ${item.car.t}</em>
+            </button>
+            <div class="pk-body" onclick="selectCard('${id}', ${item.lat}, ${item.lng})">
+                <div class="pk-title">
+                    <h3>${esc(item.name)}</h3>
+                    ${isTop ? `<span class="pk-badge">${currentSortMode === 'price' ? '最便宜' : '最近'}</span>` : ''}
+                </div>
+                <p class="pk-sub">${esc(item.category)}　${distLabel} ${dist}</p>
+                <p class="pk-price">${esc(item.payex)}</p>
+                ${buildSmartTransitBadge(item)}
+            </div>
+            <div class="pk-actions">
+                <button class="pk-fav" onclick="toggleFav('${id}')" aria-label="收藏">${isFav ? '🩷' : '🤍'}</button>
+                <button class="pk-go" onclick="startNav('${navArg}')">導航</button>
+            </div>
+        </article>`;
+    }).join('');
 }
 
 function selectCard(id, lat, lng) {
@@ -756,7 +755,8 @@ window.startNav = function(itemStr) {
     const request = {
         origin: new google.maps.LatLng(userLocation[0], userLocation[1]),
         destination: new google.maps.LatLng(item.lat, item.lng),
-        travelMode: google.maps.TravelMode.DRIVING
+        travelMode: google.maps.TravelMode.DRIVING,
+        region: 'TW'
     };
 
     directionsService.route(request, function(result, status) {
@@ -865,32 +865,17 @@ function createSearchMarker(name, lat, lng, address = "") {
     map.setZoom(16);
 }
 
+// 轉乘標籤（目前是用距離「估算」的，所以明確標示）
 function buildSmartTransitBadge(item) {
     if (!item || !item.transit) return '';
-
-    let icon = '🚶';
-    let label = '直接步行';
-    let colorClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
-
-    switch (item.transit.mode) {
-        case 'walk': icon = '🚶'; label = '直接步行'; colorClass = 'bg-emerald-50 text-emerald-700 border-emerald-200'; break;
-        case 'youbike': icon = '🚲'; label = 'YouBike 轉乘'; colorClass = 'bg-orange-50 text-orange-700 border-orange-200'; break;
-        case 'mrt': icon = '🚇'; label = '捷運轉乘'; colorClass = 'bg-blue-50 text-blue-700 border-blue-200'; break;
-        case 'bus': icon = '🚌'; label = '公車轉乘'; colorClass = 'bg-amber-50 text-amber-800 border-amber-200'; break;
-    }
-
+    const L = { walk: ['🚶', '步行'], youbike: ['🚲', 'YouBike'], mrt: ['🚇', '捷運'], bus: ['🚌', '公車'] };
+    const [icon, label] = L[item.transit.mode] || L.walk;
     return `
-        <div class="mt-2.5 flex items-center gap-1.5 ${colorClass} border px-2.5 py-1.5 rounded-lg shadow-sm w-fit transition-all hover:scale-[1.02]">
-            <span class="text-sm shadow-sm">${icon}</span>
-            <div class="flex flex-col">
-                <div class="flex items-baseline gap-1.5">
-                    <span class="text-[11px] font-black tracking-wide">${label}</span>
-                    <span class="text-[12px] font-black font-mono">約 ${item.transit.time} 分</span>
-                </div>
-                ${item.transit.desc ? `<span class="text-[9px] font-bold opacity-75 mt-[1px]">${item.transit.desc}</span>` : ''}
-            </div>
-        </div>
-    `;
+        <div class="pk-transit t-${item.transit.mode}">
+            <span class="pk-t-icon">${icon}</span>
+            <span><b>${label} 約 ${item.transit.time} 分</b>（估算）
+            ${item.transit.desc ? `<small>${esc(item.transit.desc)}</small>` : ''}</span>
+        </div>`;
 }
 
 // ==========================================
@@ -1079,7 +1064,8 @@ window.panToUserLocation = function() {
 // ==========================================
 async function checkAIPrediction(targetTotalSpaces, currentCars, etaMinutes) {
     try {
-        const response = await fetch('/api/predict_and_recommend', {
+        // 修正：原本用相對路徑，本機開發時會打到錯的網址
+        const response = await fetch(`${API_BASE_URL}/api/predict_and_recommend`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
