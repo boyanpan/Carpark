@@ -4,134 +4,131 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>P-Finder | 智能停車推薦</title>
-    
-    <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- 🌟 Google Maps API -->
-    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDCNjrUE7UN9GPqdnVg6ubx13FGQHLHei4&libraries=places,marker,geometry&v=weekly"></script>
-    <!-- 🌟 Google Maps 官方 MarkerClusterer 叢集套件 -->
-    <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
 
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;800&display=swap" rel="stylesheet">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Google Maps API（請到 Google Cloud 把這把 Key 限制為你的網域） -->
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDCNjrUE7UN9GPqdnVg6ubx13FGQHLHei4&libraries=places,marker,geometry&v=weekly"></script>
+    <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
     <link rel="stylesheet" href="style.css">
 </head>
-<body class="bg-[#faf6f0] overflow-hidden relative touch-none md:touch-auto font-sans text-stone-800">
+<body class="app overflow-hidden relative touch-none md:touch-auto">
 
-    <!-- Uber 風格沈浸式導航面板 -->
-    <div id="nav-header" class="fixed top-0 left-0 right-0 z-[4000] bg-[#1b2a47] text-[#fdfbf7] p-3 shadow-2xl flex flex-col gap-2 transition-transform duration-300 transform -translate-y-full rounded-b-2xl border-b border-[#c5b49e]/30">
+    <!-- 導航面板 -->
+    <div id="nav-header" class="fixed top-0 left-0 right-0 z-[4000] text-white px-3 pb-3 flex flex-col gap-2 transition-transform duration-300 transform -translate-y-full rounded-b-2xl">
         <div class="flex items-center gap-3">
-            <div class="w-12 h-12 flex items-center justify-center bg-white/10 rounded-2xl border border-white/20 shadow-inner shrink-0">
-                <span id="nav-arrow" class="text-3xl font-bold">⬆️</span>
+            <div class="w-12 h-12 flex items-center justify-center bg-white/10 rounded-2xl border border-white/20 shrink-0">
+                <span id="nav-arrow">⬆️</span>
             </div>
             <div class="flex-1 overflow-hidden">
                 <p id="nav-instruction" class="text-base font-bold leading-tight truncate">計算路徑中...</p>
-                <p id="nav-metrics" class="text-xs opacity-90 font-mono tracking-wide mt-1">計算中...</p>
+                <p id="nav-metrics" class="text-xs opacity-80 mt-1">計算中...</p>
             </div>
-            <button onclick="stopNavigation()" class="bg-[#e11d48] hover:bg-[#be123c] px-3 py-2 rounded-xl font-bold shadow-md transition active:scale-95 text-xs shrink-0 text-white">結束<br>導航</button>
+            <button onclick="stopNavigation()" class="bg-rose-600 hover:bg-rose-700 px-3 py-2 rounded-xl font-bold transition active:scale-95 text-xs shrink-0 text-white leading-tight">結束<br>導航</button>
         </div>
     </div>
 
     <div id="ui-container" class="absolute top-0 left-0 w-full h-full pointer-events-none flex flex-col md:flex-row z-[2000] overflow-hidden">
-        
-        <div id="sidebar-wrapper" class="w-full md:w-[400px] h-full flex flex-col shrink-0 md:bg-[#fffdfb] md:shadow-[6px_0_30px_rgba(43,34,27,0.08)] relative overflow-hidden md:border-r md:border-[#e6dfd5]">
-            
-            <div id="search-panel" class="pointer-events-auto bg-[#fffdfb] p-4 shadow-md md:shadow-none rounded-b-3xl md:rounded-none z-50 transition-transform duration-300 ease-in-out shrink-0 border-b border-[#e6dfd5]/60">
+
+        <div id="sidebar-wrapper" class="w-full md:w-[400px] h-full flex flex-col shrink-0 md:bg-white md:shadow-[6px_0_30px_rgba(15,23,42,0.1)] relative overflow-hidden md:border-r md:border-slate-200">
+
+            <!-- 搜尋面板 -->
+            <div id="search-panel" class="pointer-events-auto rounded-b-3xl md:rounded-none z-50 transition-transform duration-300 ease-in-out shrink-0">
                 <div class="flex justify-between items-center mb-3">
-                    <h1 class="text-xl font-black text-[#1b2a47] tracking-tight flex items-center gap-1.5 font-serif">📖 P-Finder</h1>
-                    <div id="gps-status" class="flex items-center gap-1.5 text-[10px] font-bold text-stone-500 bg-[#fbf9f6] px-2.5 py-1 rounded-full border border-[#e6dfd5]">
+                    <h1 class="brand"><span class="brand-mark">P</span>P-Finder</h1>
+                    <div id="gps-status" class="gps-pill">
                         GPS <div id="gps-dot" class="w-2 h-2 bg-red-500 rounded-full"></div>
                     </div>
                 </div>
-                
-                <div class="flex flex-col gap-2">
-                    <div class="flex gap-1.5 relative">
-                        <div class="relative flex-1">
-                            <input type="text" id="searchInput" autocomplete="off" onkeydown="if(event.key === 'Enter') searchLocation()" placeholder="搜尋停車場、超商或地點..." 
-                                   class="w-full p-2.5 bg-[#fbf9f6] border border-[#e6dfd5] rounded-xl text-sm outline-none focus:border-[#1b2a47] focus:bg-white text-stone-800 transition shadow-inner placeholder-stone-400">
-                            <div id="autocomplete-list" class="absolute left-0 right-0 top-full mt-1 bg-white border border-[#e6dfd5] rounded-xl shadow-2xl hidden max-h-[40vh] overflow-y-auto z-[7000]">
-                            </div>
-                        </div>
-                        <button onclick="searchLocation()" class="bg-blue-600 text-white px-4 rounded-lg shadow-sm active:bg-blue-800 text-sm font-bold transition shrink-0">搜尋</button>
-                        <button id="voiceBtn" onclick="toggleContinuousVoice()" class="bg-white border border-slate-200 w-10 rounded-lg shadow-sm active:bg-slate-50 text-lg flex items-center justify-center shrink-0 transition" title="開啟免持語音控制">🎙️</button>
-                        <button onclick="clearSearchAndLocate()" class="bg-white border border-slate-200 w-10 rounded-lg shadow-sm active:bg-slate-50 text-lg flex items-center justify-center shrink-0">📍</button>
-                    </div>
 
-                    <div class="flex gap-2">
-                        <select id="radiusSelect" onchange="handleFilter()" class="flex-1 p-2 bg-[#fbf9f6] border border-[#e6dfd5] rounded-xl text-sm outline-none font-bold text-stone-600 focus:border-[#1b2a47] cursor-pointer shadow-sm">
-                            <option value="500">📍 500 公尺內</option>
-                            <option value="1000" selected>📍 1 公里內</option>
-                            <option value="2000">📍 2 公里內</option>
-                            <option value="5000">📍 5 公里內</option>
-                            <option value="99999">📍 顯示全部</option>
-                        </select>
-                        
-                        <select id="sortSelect" onchange="changeSortMode()" class="flex-1 p-2 bg-[#f4ece1] border border-[#dcd1c0] rounded-xl text-sm outline-none font-black text-[#7c664e] focus:border-[#1b2a47] cursor-pointer shadow-sm">
-                            <option value="distance" selected>✨ 推薦：距離最近</option>
-                            <option value="price">💰 推薦：價格最便宜</option>
-                        </select>
+                <div class="search-row relative">
+                    <div class="search-box">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+                        <input type="text" id="searchInput" autocomplete="off" onkeydown="if(event.key === 'Enter') searchLocation()" placeholder="搜尋停車場、地點或醫院">
+                        <div id="autocomplete-list" class="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl hidden max-h-[40vh] overflow-y-auto z-[7000]"></div>
                     </div>
-                    <div class="mt-2" id="parking-helper-zone">
-                        <button id="parkedBtn" onclick="toggleParkedStatus()" class="w-full py-2 bg-[#7c664e] hover:bg-[#63513e] text-[#fdfbf7] rounded-xl text-xs font-bold shadow-sm transition active:scale-95 flex items-center justify-center gap-1">
-                            🚗 我停好了！紀錄愛車位置
-                        </button>
+                    <button onclick="searchLocation()" class="btn-search shrink-0">搜尋</button>
+                    <button id="voiceBtn" onclick="toggleContinuousVoice()" class="bg-white border border-slate-200 w-10 rounded-lg shadow-sm active:bg-slate-50 text-lg flex items-center justify-center shrink-0 transition" title="開啟免持語音控制" aria-label="語音控制">🎙️</button>
+                    <button onclick="clearSearchAndLocate()" class="bg-white border border-slate-200 w-10 rounded-lg shadow-sm active:bg-slate-50 text-lg flex items-center justify-center shrink-0" title="清除搜尋並回到目前位置" aria-label="回到目前位置">📍</button>
+                </div>
+
+                <div class="filter-row">
+                    <select id="radiusSelect" onchange="handleFilter()" aria-label="搜尋範圍">
+                        <option value="500">500 公尺內</option>
+                        <option value="1000" selected>1 公里內</option>
+                        <option value="2000">2 公里內</option>
+                        <option value="5000">5 公里內</option>
+                        <option value="99999">顯示全部</option>
+                    </select>
+                    <select id="sortSelect" onchange="changeSortMode()" aria-label="排序方式">
+                        <option value="distance" selected>距離最近</option>
+                        <option value="price">價格最便宜</option>
+                    </select>
+                </div>
+
+                <div id="parking-helper-zone">
+                    <button id="parkedBtn" onclick="toggleParkedStatus()" class="btn-ghost">🚗 我停好了，記錄愛車位置</button>
+                </div>
+                <div id="parkedTimerPanel" class="timer-panel hidden flex-col">
+                    <div class="flex justify-between items-center">
+                        <span class="font-extrabold text-slate-800">⏰ 愛車計時</span>
+                        <button onclick="clearParkedStatus()" class="text-red-600 font-bold text-[11px] bg-white px-2.5 py-1 rounded-lg border border-red-200">清除紀錄</button>
                     </div>
-                    <div id="parkedTimerPanel" class="mt-2 bg-[#fffdf6] border-2 border-dashed border-[#c5b49e] p-3 rounded-xl hidden flex-col gap-2 shadow-sm text-xs transition-all">
-                        <div class="flex justify-between items-center">
-                            <span class="font-black text-stone-700 flex items-center gap-1">⏰ 愛車計時手帳</span>
-                            <button onclick="clearParkedStatus()" class="text-red-500 font-bold text-[11px] hover:underline bg-red-50 px-2 py-0.5 rounded-md border border-red-200">清除紀錄</button>
-                        </div>
-                        <div class="grid grid-cols-2 gap-2 bg-[#fbf9f6] p-2 rounded-lg border border-[#e6dfd5]">
-                            <div class="text-stone-600 font-medium">⏱️ 停放時間：<br><span id="parkedTimeDisplay" class="font-bold text-stone-800 font-mono text-sm">0 分鐘</span></div>
-                            <div class="text-stone-600 font-medium">💰 預估費用：<br><span id="parkedCostDisplay" class="font-bold text-[#b45309] font-mono text-sm">$0 元</span></div>
-                        </div>
-                        <button id="navToCarBtn" onclick="navToMyCar()" class="w-full bg-[#1b2a47] hover:bg-[#2c3e60] text-white py-2 rounded-xl font-black text-xs shadow-sm flex items-center justify-center gap-1 transition active:scale-95">
-                            🧭 導航回愛車位置
-                        </button>
+                    <div class="timer-grid">
+                        <div>停放時間<span id="parkedTimeDisplay" class="num">0 分鐘</span></div>
+                        <div>預估費用<span id="parkedCostDisplay" class="num cost">$0 元</span></div>
                     </div>
+                    <button id="navToCarBtn" onclick="navToMyCar()" class="pk-go pk-go-wide" style="margin-top:0">導航回愛車</button>
                 </div>
             </div>
 
             <div class="flex-1 pointer-events-none md:hidden"></div>
 
-            <div id="bottom-sheet" class="pointer-events-auto bg-[#fffdfb] rounded-t-[2.5rem] md:rounded-none shadow-[0_-8px_24px_rgba(43,34,27,0.06)] md:shadow-none flex flex-col z-30 transition-transform duration-300 ease-in-out relative md:flex-1 overflow-hidden md:h-0 md:min-h-0">
+            <!-- 停車場清單（手機為底部抽屜） -->
+            <div id="bottom-sheet" class="pointer-events-auto rounded-t-[1.75rem] md:rounded-none flex flex-col z-30 transition-transform duration-300 ease-in-out relative md:flex-1 overflow-hidden md:h-0 md:min-h-0">
                 <div id="drag-handle" class="w-full h-8 flex justify-center items-center md:hidden cursor-pointer shrink-0" onclick="toggleBottomSheet()">
-                    <svg id="sheet-arrow" class="w-7 h-7 text-stone-300 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg id="sheet-arrow" class="transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-label="展開或收合清單">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 15l7-7 7 7"></path>
                     </svg>
                 </div>
 
-                <div class="flex border-b border-[#e6dfd5] border-t border-t-[#e6dfd5]/40 md:border-t-0 text-center text-sm font-bold text-stone-400 shrink-0 bg-[#fbf9f6]">
-                    <button onclick="switchTab('search')" id="tab-search" class="flex-1 py-3 text-[#1b2a47] border-b-2 border-[#1b2a47] font-bold transition-colors">附近推薦</button>
-                    <button onclick="switchTab('fav')" id="tab-fav" class="flex-1 py-3 border-b-2 border-transparent hover:text-stone-600 transition-colors">我的收藏</button>
+                <div class="tabs">
+                    <button onclick="switchTab('search')" id="tab-search" class="text-[#1b2a47] border-b-2 border-[#1b2a47]">附近推薦</button>
+                    <button onclick="switchTab('fav')" id="tab-fav" class="border-b-2 border-transparent">我的收藏</button>
                 </div>
 
-                <div id="content-list" class="flex-1 overflow-y-auto p-3.5 space-y-3 bg-[#faf6f0] md:bg-[#fffdfb] no-scrollbar pb-12 overscroll-contain">
-                    <div class="text-center py-20 text-stone-400 font-bold font-serif animate-pulse">📖 正在翻閱雲端資料庫房...</div>
+                <div id="content-list" class="flex-1 overflow-y-auto p-3 space-y-2.5 no-scrollbar pb-12 overscroll-contain">
+                    <div class="pk-empty animate-pulse">正在讀取即時車位…</div>
                 </div>
             </div>
         </div>
     </div>
-    
-    <!-- 地圖容器 -->
+
+    <!-- 地圖 -->
     <div id="map" class="absolute top-0 left-0 w-full h-full z-[1000]"></div>
 
-    <!-- 🌟 回到我的定位按鈕 (帶有高層級 z-index 確保一定看得見) -->
-    <button onclick="panToUserLocation()" id="recenter-btn" title="回到我的定位" 
-        class="fixed right-5 bottom-8 z-[3000] bg-white hover:bg-slate-50 text-stone-700 w-12 h-12 rounded-full shadow-2xl border border-stone-200 flex items-center justify-center text-xl active:scale-90 transition-all cursor-pointer">
+    <!-- 回到我的位置 -->
+    <button onclick="panToUserLocation()" id="recenter-btn" title="回到我的位置" aria-label="回到我的位置"
+        class="fixed right-5 bottom-8 z-[3000] bg-white text-slate-700 w-12 h-12 rounded-full border border-slate-200 flex items-center justify-center text-xl cursor-pointer">
         🎯
     </button>
 
-    <!-- AI 預測與推薦面板 -->
+    <!-- AI 預測與推薦 -->
     <div id="ai-recommendation-panel" class="hidden">
-        <div class="ai-warning-header">⚠️ AI 預測：抵達時車位極可能客滿！</div>
+        <div class="ai-warning-header">⚠️ AI 預測：抵達時車位可能客滿</div>
         <div class="ai-recommendation-body">
-            <p>為您尋找最佳替代方案：</p>
+            <p>建議改去：</p>
             <h4 id="alt-name">推薦停車場名稱</h4>
             <p id="alt-info">距離 / 費率 / 剩餘車位</p>
-            <button id="switch-route-btn">一鍵切換導航路線</button>
+            <button id="switch-route-btn">改導航到這裡</button>
         </div>
     </div>
-    
+
     <script src="script.js"></script>
 </body>
 </html>
