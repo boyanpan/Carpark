@@ -222,6 +222,14 @@ def safe_num(v):
     return None if pd.isna(v) else int(v)
 
 
+def clean(v):
+    """NaN / None 一律轉成 None（MySQL 寫入 NaN 會報錯）"""
+    try:
+        return None if v is None or pd.isna(v) else v
+    except (TypeError, ValueError):
+        return v
+
+
 def extract_structure_type(row):
     text = f"{row.get('name', '')} {row.get('address', '')}"
     if "地下" in text:
@@ -261,9 +269,9 @@ def sync_data_to_db():
                 lng, lat = TRANSFORMER.transform(float(row["tw97x"]), float(row["tw97y"]))
                 p_name = str(row.get("name", ""))
                 values.append((
-                    row['id'], p_name, categorize_parking(p_name), row.get('address'), lat, lng,
+                    row['id'], p_name, categorize_parking(p_name), clean(row.get('address')), lat, lng,
                     safe_num(row.get('availablecar')), safe_num(row.get('totalcar')),
-                    row.get('payex'), extract_structure_type(row)
+                    clean(row.get('payex')), extract_structure_type(row)
                 ))
             except Exception as e:
                 skipped += 1
@@ -281,8 +289,23 @@ def sync_data_to_db():
         """
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.executemany(sql, values)
-        conn.commit()
+        try:
+            cursor.executemany(sql, values)
+            conn.commit()
+        except Exception as e:
+            # 批次寫入失敗（通常是某一筆資料有問題）→ 退回逐筆寫入，壞資料只略過那一筆
+            print(f"[WARN] 批次寫入失敗，改為逐筆寫入: {type(e).__name__}: {str(e)[:150]}")
+            conn.rollback()
+            failed = 0
+            for v in values:
+                try:
+                    cursor.execute(sql, v)
+                except Exception as e2:
+                    failed += 1
+                    if failed <= 3:
+                        print(f"[WARN] 略過一筆寫入失敗: {type(e2).__name__}: {str(e2)[:150]}")
+            conn.commit()
+            skipped += failed
         cursor.close()
         conn.close()
         print(f"[INFO] 資料同步完成 ✅（{len(values)} 筆，略過 {skipped} 筆）")
