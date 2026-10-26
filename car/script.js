@@ -1112,3 +1112,45 @@ async function checkAIPrediction(targetTotalSpaces, currentCars, etaMinutes) {
         console.error("AI 預測請求失敗:", error);
     }
 }
+
+// ==========================================
+// 手機橫向 → 自動全螢幕（需第一次點擊觸發）
+// ==========================================
+(function () {
+    const root = document.documentElement;
+    const reqFS = root.requestFullscreen || root.webkitRequestFullscreen;
+    const exitFS = document.exitFullscreen || document.webkitExitFullscreen;
+    if (!reqFS) return; // iPhone Safari 不支援，見下方說明
+
+    const inFS = () => document.fullscreenElement || document.webkitFullscreenElement;
+    let triedThisLandscape = false; // 每次轉橫向只自動進入一次，避免使用者手動退出後一直被拉回去
+
+    function tryEnter() {
+        if (triedThisLandscape || inFS() || !isLandscapePhone()) return;
+        triedThisLandscape = true;
+        try {
+            const p = reqFS.call(root);
+            if (p && p.catch) p.catch(() => {});
+        } catch (e) {}
+    }
+
+    ['touchend', 'click'].forEach(ev =>
+        document.addEventListener(ev, tryEnter, { passive: true })
+    );
+
+    function onRotate() {
+        if (!isLandscapePhone()) {
+            triedThisLandscape = false;
+            if (inFS() && exitFS) {
+                try {
+                    const p = exitFS.call(document);
+                    if (p && p.catch) p.catch(() => {});
+                } catch (e) {}
+            }
+        }
+        applyLayout(); // 全螢幕後尺寸改變，重算版型
+    }
+    window.addEventListener('orientationchange', () => setTimeout(onRotate, 300));
+    document.addEventListener('fullscreenchange', () => setTimeout(applyLayout, 150));
+    document.addEventListener('webkitfullscreenchange', () => setTimeout(applyLayout, 150));
+})();
