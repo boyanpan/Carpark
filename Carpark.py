@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import os
 import re
 import time
@@ -29,9 +28,6 @@ load_dotenv()
 app = Flask(__name__, static_folder='car', static_url_path='/')
 CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"], "allow_headers": "*"}})
 
-# =========================================================
-# LINE Bot
-# =========================================================
 line_bot_api = LineBotApi(os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', ''))
 handler = WebhookHandler(os.environ.get('LINE_CHANNEL_SECRET', ''))
 
@@ -44,9 +40,6 @@ def reply(event, text: str):
         print(f"[LINE] 回覆失敗: {type(e).__name__}: {e}")
 
 
-# =========================================================
-# AI 客滿預測模型
-# =========================================================
 try:
     ai_model = joblib.load('parking_model.pkl')
     print("🧠 AI 動態預測大腦載入成功！")
@@ -62,9 +55,6 @@ def predict_full(total_spaces: int, current_cars: int, eta_minutes: int) -> bool
     return int(pred) != 0
 
 
-# =========================================================
-# Aiven 資料庫
-# =========================================================
 DB_CONFIG = {
     'user': 'avnadmin',
     'password': os.environ.get('DB_PASSWORD'),
@@ -76,7 +66,6 @@ DB_CONFIG = {
 
 URL_DESC = "https://tcgbusfs.blob.core.windows.net/blobtcmsv/TCMSV_alldesc.json"
 URL_AVAIL = "https://tcgbusfs.blob.core.windows.net/blobtcmsv/TCMSV_allavailable.json"
-# 台北市 YouBike 2.0 即時資料（若網址日後變動，請到台北市資料大平台確認）
 URL_YOUBIKE = os.environ.get(
     'YOUBIKE_URL', "https://tcgbusfs.blob.core.windows.net/dotapp/youbike/v2/youbike_immediate.json")
 TRANSFORMER = Transformer.from_crs("EPSG:3826", "EPSG:4326", always_xy=True)
@@ -219,13 +208,10 @@ def sync_data_to_db():
         print(f"[ERROR] 資料同步失敗: {e}")
 
 
-# =========================================================
-# 費率解析與停車費估算（錢的問題一律從這裡算，不讓 AI 自己猜）
-# =========================================================
 _RATE_PATTERNS = [
-    re.compile(r'(\d+)\s*元\s*[/／每]\s*(?:小時|小时|時|hr|HR)'),      # 30元/時、30元每小時
-    re.compile(r'每\s*(?:小時|時)\s*(\d+)\s*元'),                      # 每小時30元
-    re.compile(r'(?:小時|時)\s*[:：]?\s*(\d+)\s*元'),                  # 小時 30元
+    re.compile(r'(\d+)\s*元\s*[/／每]\s*(?:小時|小时|時|hr|HR)'),
+    re.compile(r'每\s*(?:小時|時)\s*(\d+)\s*元'),
+    re.compile(r'(?:小時|時)\s*[:：]?\s*(\d+)\s*元'),
 ]
 
 
@@ -250,9 +236,6 @@ def estimate_cost(rate, hours: float):
     return int(rate * math.ceil(max(hours, 0.5)))
 
 
-# =========================================================
-# 距離 / 停車場查詢
-# =========================================================
 def haversine_m(lat1, lng1, lat2, lng2) -> float:
     R = 6371000
     p1, p2 = math.radians(lat1), math.radians(lat2)
@@ -347,9 +330,6 @@ def find_alternatives(dest_lat, dest_lng, exclude_id=None, radius_m=800, limit=3
     return out[:limit]
 
 
-# =========================================================
-# 轉乘：YouBike / 捷運
-# =========================================================
 _yb_cache = {"t": 0, "data": []}
 
 
@@ -395,7 +375,7 @@ def youbike_leg(lot_lat, lot_lng, dest_lat, dest_lng):
     e, d2 = _nearest(stations, dest_lat, dest_lng, key=lambda x: x["ret"] > 0)
     if not s or not e or s["name"] == e["name"] or d1 > 500 or d2 > 500:
         return {"is_valid": False}
-    ride_m = haversine_m(s["lat"], s["lng"], e["lat"], e["lng"]) * 1.3  # 路程約為直線的 1.3 倍
+    ride_m = haversine_m(s["lat"], s["lng"], e["lat"], e["lng"]) * 1.3
     return {
         "is_valid": True,
         "walk_to_start": max(1, round(d1 / 80)),
@@ -438,7 +418,7 @@ def metro_leg(lot_lat, lot_lng, dest_lat, dest_lng):
     return {
         "is_valid": True,
         "walk_to_start": max(1, round(d1 / 80)),
-        "ride_time": max(2, round(ride_m / 500) + 3),  # 約 30km/h + 候車
+        "ride_time": max(2, round(ride_m / 500) + 3),
         "walk_from_end": max(1, round(d2 / 80)),
         "from_name": s["name"], "to_name": e["name"],
     }
@@ -449,7 +429,6 @@ def calculate_best_transit_mode(distance: float, pure_walk_time: float, yb_data:
     best_time = pure_walk_time
     recommendation_reason = ""
 
-    # 步行優先：10 分鐘內或 800 公尺內
     if pure_walk_time <= 10 or distance <= 800:
         return {"mode": "WALK", "total_time": pure_walk_time, "reason": ""}
 
@@ -471,7 +450,6 @@ def calculate_best_transit_mode(distance: float, pure_walk_time: float, yb_data:
         best_time = total_metro_time
         recommendation_reason = "長途移動，搭乘大眾運輸最節省時間🚇"
 
-    # 節省不到 3 分鐘就不值得換乘
     if best_mode != 'WALK':
         if pure_walk_time - best_time <= 3:
             return {"mode": "WALK", "total_time": pure_walk_time, "reason": ""}
@@ -488,9 +466,6 @@ def build_transit_info(lot, dest_lat, dest_lng):
     return {**decision, "walk_min": walk, "youbike": yb, "metro": metro}
 
 
-# =========================================================
-# 目的地規劃：附近有位 → 直接推薦；都滿 → 較遠的替代停車場 + YouBike/捷運
-# =========================================================
 def build_plan(dest_name, lat, lng, hours=2.0):
     nearby_all = lots_near(lat, lng, 800, hours)
     roomy = [l for l in nearby_all if has_room(l)]
@@ -576,9 +551,6 @@ def plan_to_text(plan, mode="recommend"):
     return msg
 
 
-# =========================================================
-# Google 地點搜尋
-# =========================================================
 def geocode_place(keyword: str):
     """用 Google Places 把地名轉成座標，回傳 (name, lat, lng) 或 None；API Key 缺少則丟出 RuntimeError"""
     GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
@@ -597,10 +569,6 @@ def geocode_place(keyword: str):
     return first['name'], first['geometry']['location']['lat'], first['geometry']['location']['lng']
 
 
-# =========================================================
-# Gemini 工具（Function Calling）
-# 所有「車位 / 費率 / 價格」的答案都由這些函式從資料庫取得，AI 只負責組織語言
-# =========================================================
 def safe_tool(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
@@ -740,21 +708,14 @@ def predict_lot_full(lot_name: str, eta_minutes: int = 15) -> dict:
 GEMINI_TOOLS = [find_parking_near, get_parking_fee, estimate_parking_cost,
                 find_cheapest_parking_near, plan_transit_alternatives, predict_lot_full]
 
-# =========================================================
-# Gemini AI 對話（多把 key 輪替 + 限流 + 逾時 + 對話記憶 + 固定備案）
-# .env 範例：
-#   GEMINI_API_KEYS=key1,key2,key3
-#   GEMINI_MODEL=gemini-2.5-flash
-#   GEMINI_DAILY_LIMIT=60          (選填，預設每把 key 15 次)
-# =========================================================
 GEMINI_KEYS = [
     k.strip()
     for k in os.environ.get('GEMINI_API_KEYS', os.environ.get('GEMINI_API_KEY', '')).split(',')
     if k.strip()
 ]
 GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-2.5-flash')
-GEMINI_TIMEOUT_MS = 12000   # 含工具呼叫的來回，單次請求最多 12 秒
-GEMINI_TOTAL_BUDGET_S = 22  # 全部 key 加起來最多 22 秒，避免 LINE reply token 過期
+GEMINI_TIMEOUT_MS = 12000
+GEMINI_TOTAL_BUDGET_S = 22
 
 gemini_clients = []
 for _k in GEMINI_KEYS:
@@ -783,7 +744,6 @@ SYSTEM_PROMPT = (
     "6. 與停車無關的問題可簡短友善回應，但不要編造系統沒有的功能。"
 )
 
-# 簡單訊息直接回，不消耗 API 額度
 QUICK_REPLIES = {
     "你好": "👋 你好！我是停車小幫手，直接告訴我你要去哪裡、想停多久，我幫你找車位和試算停車費！",
     "哈囉": "👋 哈囉！告訴我你要去哪裡，我幫你找有位置的停車場～",
@@ -800,13 +760,11 @@ FALLBACK_REPLY = (
     "• 點選單「開啟地圖」：開啟互動地圖"
 )
 
-# 每人每分鐘最多 3 次、全系統每日上限
 PER_USER_PER_MIN = 3
 DAILY_LIMIT = int(os.environ.get('GEMINI_DAILY_LIMIT', 15 * max(len(gemini_clients), 1)))
 _user_calls = defaultdict(deque)
 _daily = {"date": None, "count": 0}
 
-# 每位使用者最近的對話（記憶體版，15 分鐘內有效），讓「那邊如果滿了呢？」這類追問聽得懂
 HISTORY_TTL_S = 15 * 60
 _history = defaultdict(lambda: deque(maxlen=8))
 
@@ -860,7 +818,7 @@ def ask_gemini(user_id: str, text: str):
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(maximum_remote_calls=5),
                     max_output_tokens=600,
                     temperature=0.4,
-                    thinking_config=types.ThinkingConfig(thinking_budget=0),  # 若模型不支援請刪掉這行
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
                 ),
             )
             _key_idx = idx
@@ -875,9 +833,6 @@ def ask_gemini(user_id: str, text: str):
     return None
 
 
-# =========================================================
-# Web API
-# =========================================================
 @app.route("/")
 def serve_index():
     return app.send_static_file('index.html')
@@ -982,7 +937,6 @@ def predict_and_recommend():
         current_cars = data.get('current_cars', 40)
         lot_lat = lot_lng = None
 
-        # 有 lot_id 就以資料庫即時資料為準，不信任前端傳來的數字
         if lot_id:
             rows = db_rows("SELECT lat, lng, available_car, total_car FROM parking_lots WHERE id = %s", (lot_id,))
             if not rows:
@@ -1020,9 +974,6 @@ def predict_and_recommend():
         return jsonify({"error": str(e)}), 500
 
 
-# =========================================================
-# LINE Webhook
-# =========================================================
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers.get('X-Line-Signature', '')
@@ -1034,7 +985,6 @@ def callback():
     return 'OK'
 
 
-# 使用者對話狀態（記憶體版；伺服器重啟會清空）
 user_states = {}
 
 PROMPT_RECOMMEND = ("📍 【目的地尋車】\n\n請輸入您想去的地點（例如：台北101、新莊體育館），"
@@ -1083,13 +1033,11 @@ def handle_message(event):
     user_text = event.message.text.strip()
     user_id = event.source.user_id
 
-    # ---------- 功能一：目的地尋車 ----------
     if user_text in ["尋車", "推薦", "地標"]:
         user_states[user_id] = "waiting_for_recommend"
         reply(event, PROMPT_RECOMMEND)
         return
 
-    # ---------- 功能二：轉乘建議（客滿替代方案 + YouBike / 捷運） ----------
     if user_text in ["轉乘", "轉乘建議", "決策", "替代"]:
         user_states[user_id] = "waiting_for_alt"
         reply(event, PROMPT_TRANSIT)
@@ -1102,7 +1050,6 @@ def handle_message(event):
 
     state = user_states.get(user_id)
 
-    # ---------- 目的地流程（兩種模式共用） ----------
     if state in ("waiting_for_recommend", "waiting_for_alt"):
         user_states.pop(user_id, None)
         place_text, hours = split_hours(user_text)
@@ -1121,7 +1068,6 @@ def handle_message(event):
         run_destination_flow(event, state, place[0], place[1], place[2], hours)
         return
 
-    # ---------- AI 對話（簡單訊息 → 固定回覆；其餘 → Gemini + 工具；失敗 → 功能引導） ----------
     if user_text.lower() in QUICK_REPLIES:
         reply(event, QUICK_REPLIES[user_text.lower()])
         return
@@ -1133,9 +1079,6 @@ def handle_message(event):
         reply(event, FALLBACK_REPLY)
 
 
-# =========================================================
-# 啟動
-# =========================================================
 init_db()
 
 scheduler = BackgroundScheduler(daemon=True)
