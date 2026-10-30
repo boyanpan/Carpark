@@ -695,44 +695,53 @@ function selectCard(id, lat, lng) {
 }
 
 // ==========================================
-// 9. 下拉智慧聯想選單
+// 9. 下拉智慧聯想選單 (修復 LINE 內建瀏覽器掛載問題)
 // ==========================================
 function initAutocomplete() {
     const searchInput = document.getElementById('searchInput');
-    let autocompleteList = document.getElementById('autocomplete-list');
+    if (!searchInput) return;
 
-    if (!autocompleteList && searchInput) {
-        searchInput.parentElement.classList.add('relative');
-        autocompleteList = document.createElement('div');
-        autocompleteList.id = 'autocomplete-list';
-        autocompleteList.className = 'absolute left-0 right-0 top-full mt-1 bg-white border border-[#e6dfd5] rounded-xl shadow-2xl hidden max-h-[40vh] overflow-y-auto z-[7000]';
-        searchInput.parentElement.appendChild(autocompleteList);
-    }
+    const searchBox = searchInput.parentElement;
 
-    if (searchInput && autocompleteList) {
-        const autocomplete = new google.maps.places.Autocomplete(searchInput, {
-            componentRestrictions: { country: "tw" },
-            fields: ["geometry", "name", "formatted_address"]
-        });
+    // 防止在 LINE 點擊鍵盤時畫面推擠變形，點擊輸入框時滑動回正
+    searchInput.addEventListener('focus', () => {
+        setTimeout(() => {
+            searchInput.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 300);
+    });
 
-        autocomplete.addListener("place_changed", () => {
-            const place = autocomplete.getPlace();
-            if (!place.geometry || !place.geometry.location) return;
+    const autocomplete = new google.maps.places.Autocomplete(searchInput, {
+        componentRestrictions: { country: "tw" },
+        fields: ["geometry", "name", "formatted_address"]
+    });
 
-            const lat = place.geometry.location.lat();
-            const lng = place.geometry.location.lng();
-            const name = place.name || searchInput.value;
-            const address = place.formatted_address || "";
+    // 定時監控並將 Google Place 自動生成的 .pac-container 強制拉進 .search-box 內部
+    const movePacTimer = setInterval(() => {
+        const pacContainer = document.querySelector('.pac-container');
+        if (pacContainer && searchBox && pacContainer.parentElement !== searchBox) {
+            searchBox.appendChild(pacContainer);
+        }
+    }, 500);
 
-            searchedLocation = [lat, lng];
-            window.currentKeyword = null; 
+    autocomplete.addListener("place_changed", () => {
+        const place = autocomplete.getPlace();
+        if (!place.geometry || !place.geometry.location) return;
 
-            createSearchMarker(name, lat, lng, address);
-            fetchTaipeiParkingData(); 
-            collapseBottomSheet();
-            autocompleteList.classList.add('hidden');
-        });
-    }
+        const lat = place.geometry.location.lat();
+        const lng = place.geometry.location.lng();
+        const name = place.name || searchInput.value;
+        const address = place.formatted_address || "";
+
+        searchedLocation = [lat, lng];
+        window.currentKeyword = null; 
+
+        createSearchMarker(name, lat, lng, address);
+        fetchTaipeiParkingData(); 
+        collapseBottomSheet();
+        
+        const autocompleteList = document.getElementById('autocomplete-list');
+        if (autocompleteList) autocompleteList.classList.add('hidden');
+    });
 }
 
 // ==========================================
