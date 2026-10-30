@@ -49,7 +49,7 @@ body.app {
     background: var(--mist); border: 1px solid var(--line); font-size: 11px; font-weight: 700; color: var(--sub);
 }
 
-.search-row { display: flex; gap: 6px; align-items: stretch; }
+.search-row { display: flex; gap: 6px; align-items: stretch; position: relative; }
 .search-box { position: relative; flex: 1; min-width: 0; }
 .search-box svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: #94a3b8; pointer-events: none; }
 .search-box input {
@@ -197,9 +197,22 @@ body.sheet-open #recenter-btn { opacity: 0; pointer-events: none; }
 #switch-route-btn { width: 100%; margin-top: 12px; padding: 12px; border-radius: 12px; background: var(--sign); color: #fff; font-size: 15px; font-weight: 700; }
 #switch-route-btn:active { background: var(--sign-dark); }
 
-/* Google 自動完成下拉 */
-.pac-container { z-index: 99999 !important; margin-top: 6px; border-radius: 14px; border: 1px solid var(--line); box-shadow: 0 12px 30px rgba(15, 23, 42, .16); font-family: inherit; overflow: hidden; }
-.pac-item { padding: 8px 12px; }
+/* ---------- Google 自動完成下拉樣式修正（支援 LINE 內建瀏覽器） ---------- */
+.pac-container {
+    z-index: 99999 !important;
+    margin-top: 6px;
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    box-shadow: 0 12px 30px rgba(15, 23, 42, .16);
+    font-family: inherit;
+    overflow: hidden;
+    position: absolute !important;
+}
+.pac-item {
+    padding: 10px 12px;
+    font-size: 14px;
+    cursor: pointer;
+}
 
 /* ---------- 桌面版 ---------- */
 @media (min-width: 768px) {
