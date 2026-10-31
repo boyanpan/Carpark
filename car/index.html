@@ -11,7 +11,7 @@
 
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- Google Maps API -->
+    <!-- Google Maps API（請到 Google Cloud 把這把 Key 限制為你的網域） -->
     <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDCNjrUE7UN9GPqdnVg6ubx13FGQHLHei4&libraries=places,marker,geometry&v=weekly"></script>
     <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
@@ -43,13 +43,20 @@
 
             <!-- 搜尋面板 -->
             <div id="search-panel" class="pointer-events-auto rounded-b-3xl md:rounded-none z-50 transition-transform duration-300 ease-in-out shrink-0">
-                <div class="flex justify-between items-center mb-3">
+                <!-- 第 1 列：品牌 + 記錄停車 + GPS -->
+                <div class="panel-head">
                     <h1 class="brand"><span class="brand-mark">P</span>P-Finder</h1>
-                    <div id="gps-status" class="gps-pill">
-                        GPS <div id="gps-dot" class="w-2 h-2 bg-red-500 rounded-full"></div>
+                    <div class="head-right">
+                        <div id="parking-helper-zone">
+                            <button id="parkedBtn" onclick="toggleParkedStatus()" class="chip-btn">🚗 記錄停車</button>
+                        </div>
+                        <div id="gps-status" class="gps-pill">
+                            GPS <div id="gps-dot" class="w-2 h-2 bg-red-500 rounded-full"></div>
+                        </div>
                     </div>
                 </div>
 
+                <!-- 第 2 列：搜尋框（整列都給輸入框） -->
                 <div class="search-row relative">
                     <div class="search-box">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
@@ -57,10 +64,9 @@
                         <div id="autocomplete-list" class="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl hidden max-h-[40vh] overflow-y-auto z-[7000]"></div>
                     </div>
                     <button onclick="searchLocation()" class="btn-search shrink-0">搜尋</button>
-                    <button id="voiceBtn" onclick="toggleContinuousVoice()" class="bg-white border border-slate-200 w-10 rounded-lg shadow-sm active:bg-slate-50 text-lg flex items-center justify-center shrink-0 transition" title="開啟免持語音控制" aria-label="語音控制">🎙️</button>
-                    <button onclick="clearSearchAndLocate()" class="bg-white border border-slate-200 w-10 rounded-lg shadow-sm active:bg-slate-50 text-lg flex items-center justify-center shrink-0" title="清除搜尋並回到目前位置" aria-label="回到目前位置">📍</button>
                 </div>
 
+                <!-- 第 3 列：範圍 / 排序 / 語音 / 回到位置 -->
                 <div class="filter-row">
                     <select id="radiusSelect" onchange="handleFilter()" aria-label="搜尋範圍">
                         <option value="500">500 公尺內</option>
@@ -73,11 +79,10 @@
                         <option value="distance" selected>距離最近</option>
                         <option value="price">價格最便宜</option>
                     </select>
+                    <button id="voiceBtn" onclick="toggleContinuousVoice()" class="bg-white border border-slate-200 w-10 rounded-lg shadow-sm active:bg-slate-50 text-lg flex items-center justify-center shrink-0 transition" title="開啟免持語音控制" aria-label="語音控制">🎙️</button>
+                    <button id="locateBtn" onclick="clearSearchAndLocate()" class="bg-white border border-slate-200 w-10 rounded-lg shadow-sm active:bg-slate-50 text-lg flex items-center justify-center shrink-0" title="清除搜尋並回到目前位置" aria-label="回到目前位置">📍</button>
                 </div>
 
-                <div id="parking-helper-zone">
-                    <button id="parkedBtn" onclick="toggleParkedStatus()" class="btn-ghost">🚗 我停好了，記錄愛車位置</button>
-                </div>
                 <div id="parkedTimerPanel" class="timer-panel hidden flex-col">
                     <div class="flex justify-between items-center">
                         <span class="font-extrabold text-slate-800">⏰ 愛車計時</span>

@@ -253,3 +253,60 @@ body.is-searching #search-panel {
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+/* ==========================================================
+   style_patch.css — 整段貼在 style.css 「最最後面」
+   （後面的規則會蓋過前面同名的，不用刪原本的）
+   ========================================================== */
+
+/* ---------- 搜尋面板：搜尋框獨佔一整列 ---------- */
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.head-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.chip-btn {
+    height: 30px; padding: 0 10px; border-radius: 999px; white-space: nowrap;
+    border: 1.5px dashed #b6c2d6; background: #fff; color: var(--ink); font-size: 12px; font-weight: 700;
+}
+.chip-btn:active { background: var(--mist); }
+
+.search-box input { height: 46px; font-size: 15px; padding-right: 12px; text-overflow: ellipsis; }
+.btn-search { height: 46px; min-width: 68px; }
+
+.filter-row { align-items: stretch; margin-top: 10px; gap: 8px; }
+.filter-row select { height: 42px; }
+#voiceBtn, #locateBtn { width: 44px !important; height: 42px; flex: none; border-radius: 12px !important; }
+
+/* ---------- 停車場卡片：資訊區變寬，按鈕移到下方整列 ---------- */
+#content-list { padding: 12px; }
+.pk-card { grid-template-columns: 60px 1fr; gap: 10px 12px; padding: 12px; }
+.pk-avail strong { font-size: 24px; }
+.pk-title h3 {
+    white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; line-height: 1.35;
+}
+.pk-actions { grid-column: 1 / -1; flex-direction: row; align-items: stretch; justify-content: flex-start; gap: 8px; }
+.pk-actions .pk-go { flex: 1; height: 42px; font-size: 14px; }
+.pk-fav { width: 42px; height: 42px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.pk-transit { margin-top: 4px; }
+
+/* ---------- 地圖彈窗：自己的關閉鈕 ---------- */
+.gm-style-iw-chr, .gm-style .gm-ui-hover-effect { display: none !important; }
+.gm-style .gm-style-iw-c { overflow: hidden !important; }
+.pk-pop { position: relative; width: 260px; }
+.pk-pop-head { padding-right: 56px; }
+.pk-close {
+    position: absolute; top: 8px; right: 8px; z-index: 2; width: 36px; height: 36px; margin: 0 !important;
+    border-radius: 50%; display: grid; place-items: center;
+    background: rgba(255, 255, 255, .25); color: #fff; font-size: 16px; font-weight: 700;
+}
+.pk-close:active { background: rgba(255, 255, 255, .45); }
+
+/* ---------- 手機橫向：維持緊湊 ---------- */
+@media (orientation: landscape) and (max-height: 500px) {
+    .panel-head { margin-bottom: 6px; }
+    .search-box input, .btn-search { height: 38px; }
+    .filter-row { margin-top: 6px; }
+    .filter-row select, #voiceBtn, #locateBtn { height: 36px; }
+    .pk-card { grid-template-columns: 60px 1fr auto; }
+    .pk-actions { grid-column: auto; flex-direction: column; }
+    .pk-actions .pk-go { flex: none; height: auto; }
+    .pk-fav { width: 34px; height: 34px; border: 0; }
+}

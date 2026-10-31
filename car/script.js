@@ -103,7 +103,10 @@ async function initGoogleMap() {
         clickableIcons: false
     });
 
-    infoWindow = new google.maps.InfoWindow({ maxWidth: 300 });
+    // 關掉 Google 內建標題列（白底白 X 看不到），改用自己的 ✕；點地圖空白處 / 按 Esc 也會關閉
+    infoWindow = new google.maps.InfoWindow({ maxWidth: 320, headerDisabled: true });
+    map.addListener('click', closePopup);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePopup(); });
 
     directionsService = new google.maps.DirectionsService();
     directionsRenderer = new google.maps.DirectionsRenderer({
@@ -113,7 +116,13 @@ async function initGoogleMap() {
     });
 
     map.addListener('dragstart', () => { if (isSheetMode() && !isNavigating) setUIHidden(true); });
-    map.addListener('dragend',   () => { if (isSheetMode() && !isNavigating) setUIHidden(false); });
+    map.addListener('dragend', () => {
+        if (isSheetMode() && !isNavigating) {
+            setUIHidden(false);
+            // 彈窗開著時，搜尋面板維持收起
+            if (popupOpen && searchPanel) searchPanel.style.transform = 'translateY(-100%)';
+        }
+    });
 
     if (typeof DeviceOrientationEvent !== 'undefined' &&
         typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -539,23 +548,24 @@ function handleFilter() {
     renderList(data, !!searchedLocation); 
 }
 
+// 點圖釘：清單捲到對應卡片即可（不再展開抽屜，避免蓋住地圖和彈窗）
 window.highlightCardInList = function(id) {
     const targetCard = document.getElementById(`card-${id}`);
     if (targetCard) {
         document.querySelectorAll('.parking-card').forEach(card => card.classList.remove('top-card'));
         targetCard.classList.add('top-card');
         targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        if (isSheetMode() && !isSheetExpanded) {
-            toggleBottomSheet();
-        }
     }
 };
+
+let popupOpen = false;
 
 function openMarkerPopup(item, marker) {
     const state = availState(item.car.a);
     const navArg = encodeURIComponent(JSON.stringify(item));
     const html = `
         <div class="pk-pop">
+            <button class="pk-close" onclick="closePopup()" aria-label="關閉">✕</button>
             <div class="pk-pop-head is-${state}">
                 <strong>${state === 'nodata' ? '—' : item.car.a}</strong>
                 <span>${STATE_TEXT[state]}<br><em>共 ${item.car.t} 位</em></span>
@@ -569,6 +579,16 @@ function openMarkerPopup(item, marker) {
         </div>`;
     infoWindow.setContent(html);
     infoWindow.open(map, marker);
+    popupOpen = true;
+    // 手機上讓出頂部空間，關閉彈窗後再放回來
+    if (isSheetMode() && searchPanel) searchPanel.style.transform = 'translateY(-100%)';
+    map.panTo(marker.position);
+}
+
+function closePopup() {
+    if (infoWindow) infoWindow.close();
+    popupOpen = false;
+    if (isSheetMode() && !isNavigating && searchPanel) searchPanel.style.transform = 'translateY(0)';
 }
 
 // ==========================================
@@ -725,6 +745,7 @@ window.startNav = function(itemStr) {
     if (navHeader) navHeader.classList.add('active');
     setUIHidden(true);
     
+    popupOpen = false;
     if (infoWindow) infoWindow.close();
 
     const request = {
@@ -1014,3 +1035,45 @@ window.panToUserLocation = function() {
     map.panTo({ lat: userLocation[0], lng: userLocation[1] });
     map.setZoom(17);
 };
+
+// ==========================================
+// 手機橫向 → 自動全螢幕（需第一次點擊觸發）
+// ==========================================
+(function () {
+    const root = document.documentElement;
+    const reqFS = root.requestFullscreen || root.webkitRequestFullscreen;
+    const exitFS = document.exitFullscreen || document.webkitExitFullscreen;
+    if (!reqFS) return; // iPhone Safari 不支援
+
+    const inFS = () => document.fullscreenElement || document.webkitFullscreenElement;
+    let triedThisLandscape = false; // 每次轉橫向只自動進入一次，避免使用者手動退出後一直被拉回去
+
+    function tryEnter() {
+        if (triedThisLandscape || inFS() || !isLandscapePhone()) return;
+        triedThisLandscape = true;
+        try {
+            const p = reqFS.call(root);
+            if (p && p.catch) p.catch(() => {});
+        } catch (e) {}
+    }
+
+    ['touchend', 'click'].forEach(ev =>
+        document.addEventListener(ev, tryEnter, { passive: true })
+    );
+
+    function onRotate() {
+        if (!isLandscapePhone()) {
+            triedThisLandscape = false;
+            if (inFS() && exitFS) {
+                try {
+                    const p = exitFS.call(document);
+                    if (p && p.catch) p.catch(() => {});
+                } catch (e) {}
+            }
+        }
+        applyLayout(); // 全螢幕後尺寸改變，重算版型
+    }
+    window.addEventListener('orientationchange', () => setTimeout(onRotate, 300));
+    document.addEventListener('fullscreenchange', () => setTimeout(applyLayout, 150));
+    document.addEventListener('webkitfullscreenchange', () => setTimeout(applyLayout, 150));
+})();
