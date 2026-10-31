@@ -695,46 +695,18 @@ function selectCard(id, lat, lng) {
 }
 
 // ==========================================
-// 9. 下拉智慧聯想選單 (搜尋專注模式開關)
+// 9. 下拉智慧聯想選單 (極簡防護版)
 // ==========================================
 function initAutocomplete() {
     const searchInput = document.getElementById('searchInput');
     if (!searchInput) return;
-
-    // 1️⃣ 點擊搜尋框（鍵盤彈出）：進入「搜尋專注模式」
-    searchInput.addEventListener('focus', () => {
-        document.body.classList.add('is-searching');
-    });
-
-    // 2️⃣ 點擊地圖或離開輸入框：離開「搜尋專注模式」
-    searchInput.addEventListener('blur', () => {
-        // 延遲 200ms 避免點擊下拉選項時 premature 觸發 blur 導致選單瞬間消失
-        setTimeout(() => {
-            if (document.activeElement !== searchInput) {
-                document.body.classList.remove('is-searching');
-            }
-        }, 200);
-    });
 
     const autocomplete = new google.maps.places.Autocomplete(searchInput, {
         componentRestrictions: { country: "tw" },
         fields: ["geometry", "name", "formatted_address"]
     });
 
-    // 自動把 Google 的 .pac-container 移入 .search-box 確保樣式綁定
-    const searchBox = searchInput.parentElement;
-    setInterval(() => {
-        const pacContainer = document.querySelector('.pac-container');
-        if (pacContainer && searchBox && pacContainer.parentElement !== searchBox) {
-            searchBox.appendChild(pacContainer);
-        }
-    }, 400);
-
-    // 3️⃣ 選取完成地點後：結束專注模式並還原畫面
     autocomplete.addListener("place_changed", () => {
-        document.body.classList.remove('is-searching');
-        searchInput.blur();
-
         const place = autocomplete.getPlace();
         if (!place.geometry || !place.geometry.location) return;
 
@@ -749,6 +721,9 @@ function initAutocomplete() {
         createSearchMarker(name, lat, lng, address);
         fetchTaipeiParkingData(); 
         collapseBottomSheet();
+        
+        const autocompleteList = document.getElementById('autocomplete-list');
+        if (autocompleteList) autocompleteList.classList.add('hidden');
     });
 }
 
