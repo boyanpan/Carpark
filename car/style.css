@@ -1,6 +1,5 @@
 /* ==========================================================
    P-Finder — 停車指示牌風格
-   主視覺：台灣停車場藍底白 P 路牌 + 四種車位狀態色
    ========================================================== */
 :root {
     --ink: #1b2a47;
@@ -15,13 +14,12 @@
     --shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 4px 14px rgba(15, 23, 42, .06);
 }
 
-/* 車位狀態：一處定義，卡片 / 圖釘 / 彈窗共用 */
 .is-ok     { --c: #15803d; --cb: #e6f5ec; }
 .is-low    { --c: #b45309; --cb: #fff2d9; }
 .is-full   { --c: #b91c1c; --cb: #fde8e8; }
 .is-nodata { --c: #64748b; --cb: #eceff4; }
 
-html, body { height: 100vh; height: 100dvh; width: 100vw; margin: 0; padding: 0; }
+html, body { height: 100vh; height: 100dvh; width: 100vw; margin: 0; padding: 0; overflow: hidden; }
 body.app {
     font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
     color: var(--text);
@@ -49,7 +47,7 @@ body.app {
     background: var(--mist); border: 1px solid var(--line); font-size: 11px; font-weight: 700; color: var(--sub);
 }
 
-.search-row { display: flex; gap: 6px; align-items: stretch; }
+.search-row { display: flex; gap: 6px; align-items: stretch; width: 100%; }
 .search-box { position: relative; flex: 1; min-width: 0; }
 .search-box svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: #94a3b8; pointer-events: none; }
 .search-box input {
@@ -61,12 +59,12 @@ body.app {
 .search-box input:focus { border-color: var(--sign); background: #fff; box-shadow: 0 0 0 3px rgba(29, 78, 216, .15); }
 
 .btn-search {
-    padding: 0 16px; border-radius: 12px; background: var(--sign); color: #fff; font-size: 14px; font-weight: 700;
-    box-shadow: 0 2px 6px rgba(29, 78, 216, .3); transition: background .15s, transform .1s;
+    padding: 0 16px; height: 42px; border-radius: 12px; background: var(--sign); color: #fff; font-size: 14px; font-weight: 700;
+    box-shadow: 0 2px 6px rgba(29, 78, 216, .3); transition: background .15s, transform .1s; flex-shrink: 0;
 }
 .btn-search:active { background: var(--sign-dark); transform: scale(.97); }
 .search-row > button:not(.btn-search) {
-    width: 42px; border-radius: 12px; font-size: 18px; display: flex; align-items: center; justify-content: center;
+    width: 42px; height: 42px; border-radius: 12px; font-size: 18px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
 
 .filter-row { display: flex; gap: 8px; margin-top: 8px; }
@@ -157,7 +155,7 @@ body.app {
 .parked-marker-container { animation: parkedBounce 1s infinite alternate ease-in-out; }
 @keyframes parkedBounce { to { transform: translateY(-6px); } }
 
-/* ---------- 地圖彈窗（Google InfoWindow） ---------- */
+/* ---------- 地圖彈窗 ---------- */
 .gm-style .gm-style-iw-c { padding: 0 !important; border-radius: 16px !important; box-shadow: 0 12px 32px rgba(15, 23, 42, .25) !important; }
 .gm-style .gm-style-iw-d { overflow: auto !important; max-height: none !important; }
 .gm-style .gm-ui-hover-effect { top: 6px !important; right: 6px !important; width: 30px !important; height: 30px !important; }
@@ -170,18 +168,13 @@ body.app {
 .pk-pop-head em { font-style: normal; font-size: 11px; font-weight: 500; opacity: .85; }
 .pk-pop h3 { margin-top: 12px; margin-bottom: 2px; font-size: 16px; font-weight: 700; }
 
-/* ---------- 導航列 ---------- */
+/* ---------- 導航列與回到定位 ---------- */
 #nav-header { background: var(--ink); padding-top: calc(12px + env(safe-area-inset-top)); box-shadow: 0 10px 30px rgba(15, 23, 42, .35); }
 #nav-header.active { transform: translateY(0); }
 #nav-arrow { font-size: 30px; }
-
-/* ---------- 回到我的位置 ---------- */
 #recenter-btn { box-shadow: var(--shadow); transition: opacity .2s, transform .15s, bottom .3s; }
 #recenter-btn:active { transform: scale(.9); }
 body.sheet-open #recenter-btn { opacity: 0; pointer-events: none; }
-@media (max-width: 767px) and (orientation: portrait) {
-    #recenter-btn { bottom: calc(35vh + 16px) !important; right: 14px !important; }
-}
 
 /* ---------- AI 預測面板 ---------- */
 #ai-recommendation-panel {
@@ -206,75 +199,55 @@ body.sheet-open #recenter-btn { opacity: 0; pointer-events: none; }
     box-shadow: 0 12px 32px rgba(15, 23, 42, .25) !important;
     font-family: inherit !important;
     overflow-y: auto !important;
-    max-height: 240px !important;
+    max-height: 180px !important;
     box-sizing: border-box !important;
 }
 .pac-item {
-    padding: 10px 12px !important;
-    font-size: 14px !important;
-    line-height: 1.4 !important;
+    padding: 8px 12px !important;
+    font-size: 13px !important;
     cursor: pointer !important;
 }
 
 /* ==========================================================
-   🔍 搜尋專注模式 (點擊搜尋時：隱藏地圖與清單，保留搜尋列與篩選)
+   🔍 搜尋專注模式 (橫向與直式通用：點擊搜尋時隱藏地圖/清單，保留搜尋與篩選)
    ========================================================== */
-@media (max-width: 767px) {
-    body.is-searching #map,
-    body.is-searching #bottom-sheet,
-    body.is-searching #parking-helper-zone,
-    body.is-searching #parkedTimerPanel,
-    body.is-searching #recenter-btn {
-        display: none !important;
-    }
-
-    body.is-searching #ui-container,
-    body.is-searching #sidebar-wrapper {
-        height: 100% !important;
-        background: #ffffff !important;
-        overflow: visible !important;
-    }
-
-    body.is-searching #search-panel {
-        position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        right: 0 !important;
-        z-index: 5000 !important;
-        box-shadow: none !important;
-        border-bottom: none !important;
-    }
+body.is-searching #map,
+body.is-searching #bottom-sheet,
+body.is-searching #sidebar-wrapper > .flex-1:not(#search-panel),
+body.is-searching #parking-helper-zone,
+body.is-searching #parkedTimerPanel,
+body.is-searching #recenter-btn {
+    display: none !important;
 }
 
-/* ---------- 桌面版 ---------- */
+body.is-searching #ui-container,
+body.is-searching #sidebar-wrapper {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    background: #ffffff !important;
+    z-index: 99999 !important;
+    overflow-y: auto !important;
+}
+
+body.is-searching #search-panel {
+    position: relative !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+    padding: 16px !important;
+}
+
+/* ---------- 桌面版樣式保留 ---------- */
 @media (min-width: 768px) {
     #bottom-sheet { height: auto !important; min-height: 0 !important; flex: 1 !important; transform: none !important; box-shadow: none; }
     #search-panel { box-shadow: none; padding-top: 16px; position: relative !important; }
     #content-list { padding: 14px; }
     .pk-card { cursor: default; }
     .pk-card:hover { border-color: #c7d6fb; }
-    body { touch-action: auto; }
-}
-
-/* ---------- 手機橫向 ---------- */
-@media (orientation: landscape) and (max-height: 500px) {
-    #ui-container { flex-direction: row !important; }
-    #sidebar-wrapper {
-        width: min(380px, 46vw) !important; height: 100% !important; background: var(--paper);
-        overflow-y: auto !important; overflow-x: hidden !important; pointer-events: auto;
-        border-right: 1px solid var(--line); box-shadow: 6px 0 30px rgba(15, 23, 42, .1);
-        padding-left: env(safe-area-inset-left); transition: transform .3s ease; -webkit-overflow-scrolling: touch;
-    }
-    #sidebar-wrapper > .pointer-events-none { display: none !important; }
-    #search-panel { padding: 8px 10px !important; border-radius: 0 !important; box-shadow: none !important; transform: none !important; position: relative !important; }
-    .brand { font-size: 16px; }
-    #bottom-sheet { height: auto !important; min-height: 0 !important; flex: none !important; transform: none !important; border-radius: 0 !important; box-shadow: none !important; overflow: visible !important; }
-    #drag-handle { display: none !important; }
-    .tabs { position: sticky; top: 0; z-index: 5; }
-    #content-list { overflow: visible !important; padding-bottom: 16px !important; }
-    #nav-header { padding: 6px 10px !important; padding-left: calc(10px + env(safe-area-inset-left)) !important; }
-    #recenter-btn { bottom: 16px !important; right: calc(12px + env(safe-area-inset-right)) !important; }
-    #ai-recommendation-panel { top: 8px; max-width: 360px; }
+    body { touch-action: auto; overflow: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {
