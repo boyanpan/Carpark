@@ -695,19 +695,25 @@ function selectCard(id, lat, lng) {
 }
 
 // ==========================================
-// 9. 下拉智慧聯想選單 (修復 LINE 內建瀏覽器掛載問題)
+// 9. 下拉智慧聯想選單 (搜尋專注模式開關)
 // ==========================================
 function initAutocomplete() {
     const searchInput = document.getElementById('searchInput');
     if (!searchInput) return;
 
-    const searchBox = searchInput.parentElement;
-
-    // 防止在 LINE 點擊鍵盤時畫面推擠變形，點擊輸入框時滑動回正
+    // 1️⃣ 點擊搜尋框（鍵盤彈出）：進入「搜尋專注模式」
     searchInput.addEventListener('focus', () => {
+        document.body.classList.add('is-searching');
+    });
+
+    // 2️⃣ 點擊地圖或離開輸入框：離開「搜尋專注模式」
+    searchInput.addEventListener('blur', () => {
+        // 延遲 200ms 避免點擊下拉選項時 premature 觸發 blur 導致選單瞬間消失
         setTimeout(() => {
-            searchInput.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }, 300);
+            if (document.activeElement !== searchInput) {
+                document.body.classList.remove('is-searching');
+            }
+        }, 200);
     });
 
     const autocomplete = new google.maps.places.Autocomplete(searchInput, {
@@ -715,15 +721,20 @@ function initAutocomplete() {
         fields: ["geometry", "name", "formatted_address"]
     });
 
-    // 定時監控並將 Google Place 自動生成的 .pac-container 強制拉進 .search-box 內部
-    const movePacTimer = setInterval(() => {
+    // 自動把 Google 的 .pac-container 移入 .search-box 確保樣式綁定
+    const searchBox = searchInput.parentElement;
+    setInterval(() => {
         const pacContainer = document.querySelector('.pac-container');
         if (pacContainer && searchBox && pacContainer.parentElement !== searchBox) {
             searchBox.appendChild(pacContainer);
         }
-    }, 500);
+    }, 400);
 
+    // 3️⃣ 選取完成地點後：結束專注模式並還原畫面
     autocomplete.addListener("place_changed", () => {
+        document.body.classList.remove('is-searching');
+        searchInput.blur();
+
         const place = autocomplete.getPlace();
         if (!place.geometry || !place.geometry.location) return;
 
@@ -738,9 +749,6 @@ function initAutocomplete() {
         createSearchMarker(name, lat, lng, address);
         fetchTaipeiParkingData(); 
         collapseBottomSheet();
-        
-        const autocompleteList = document.getElementById('autocomplete-list');
-        if (autocompleteList) autocompleteList.classList.add('hidden');
     });
 }
 

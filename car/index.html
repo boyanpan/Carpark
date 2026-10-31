@@ -37,13 +37,12 @@
         </div>
     </div>
 
-    <!-- UI 容器：手機端允許 overflow-visible -->
-    <div id="ui-container" class="absolute top-0 left-0 w-full h-full pointer-events-none flex flex-col md:flex-row z-[2000] overflow-visible">
+    <div id="ui-container" class="absolute top-0 left-0 w-full h-full pointer-events-none flex flex-col md:flex-row z-[2000] overflow-hidden">
 
-        <div id="sidebar-wrapper" class="w-full md:w-[400px] h-full flex flex-col shrink-0 md:bg-white md:shadow-[6px_0_30px_rgba(15,23,42,0.1)] relative overflow-visible md:border-r md:border-slate-200">
+        <div id="sidebar-wrapper" class="w-full md:w-[400px] h-full flex flex-col shrink-0 md:bg-white md:shadow-[6px_0_30px_rgba(15,23,42,0.1)] relative overflow-hidden md:border-r md:border-slate-200">
 
             <!-- 搜尋面板 -->
-            <div id="search-panel" class="pointer-events-auto rounded-b-3xl md:rounded-none z-[5000] transition-transform duration-300 ease-in-out shrink-0 relative">
+            <div id="search-panel" class="pointer-events-auto rounded-b-3xl md:rounded-none z-50 transition-transform duration-300 ease-in-out shrink-0 relative">
                 <div class="flex justify-between items-center mb-3">
                     <h1 class="brand"><span class="brand-mark">P</span>P-Finder</h1>
                     <div id="gps-status" class="gps-pill">
@@ -55,7 +54,7 @@
                     <div class="search-box relative">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
                         <input type="text" id="searchInput" autocomplete="off" onkeydown="if(event.key === 'Enter') searchLocation()" placeholder="搜尋停車場、地點或醫院">
-                        <div id="autocomplete-list" class="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl hidden max-h-[35vh] overflow-y-auto z-[999999]"></div>
+                        <div id="autocomplete-list" class="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl hidden max-h-[40vh] overflow-y-auto z-[7000]"></div>
                     </div>
                     <button onclick="searchLocation()" class="btn-search shrink-0">搜尋</button>
                     <button id="voiceBtn" onclick="toggleContinuousVoice()" class="bg-white border border-slate-200 w-10 rounded-lg shadow-sm active:bg-slate-50 text-lg flex items-center justify-center shrink-0 transition" title="開啟免持語音控制" aria-label="語音控制">🎙️</button>

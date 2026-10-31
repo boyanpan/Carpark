@@ -511,3 +511,43 @@ body.sheet-open #recenter-btn { opacity: 0; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* ==========================================================
+   搜尋專注模式 (LINE App / 手機鍵盤彈出專用)
+   ========================================================== */
+@media (max-width: 767px) {
+    /* 進入搜尋狀態時：隱藏地圖、底部清單、愛車紀錄按鈕與定位按鈕 */
+    body.is-searching #map,
+    body.is-searching #bottom-sheet,
+    body.is-searching #parking-helper-zone,
+    body.is-searching #parkedTimerPanel,
+    body.is-searching #recenter-btn {
+        display: none !important;
+    }
+
+    /* 確保 UI 容器滿版覆蓋 */
+    body.is-searching #ui-container,
+    body.is-searching #sidebar-wrapper {
+        height: 100% !important;
+        background: #ffffff !important;
+        overflow: visible !important;
+    }
+
+    /* 搜尋面板維持在最頂端 */
+    body.is-searching #search-panel {
+        box-shadow: none !important;
+        border-bottom: none !important;
+        border-radius: 0 !important;
+    }
+
+    /* 搜尋自動完成選單高層級與懸浮顯示 */
+    body.is-searching .pac-container {
+        position: relative !important;
+        top: 6px !important;
+        left: 0 !important;
+        width: 100% !important;
+        z-index: 999999 !important;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15) !important;
+        border-radius: 14px !important;
+    }
+}
