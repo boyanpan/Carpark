@@ -869,79 +869,116 @@ function buildSmartTransitBadge(item) {
 // ==========================================
 // 12. 語音控制與愛車計時
 // ==========================================
-let voiceRecognition;
-let isVoiceActive = false; 
+let voiceRecognition = null;
+let isVoiceActive = false;
+let voiceRestartTimer = null;
 
-function initVoiceControl() {
-    const SpeechRecognition = window.ShareSpeechRecognition || window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) return;
-    
-    voiceRecognition = new SpeechRecognition();
-    voiceRecognition.continuous = true;       
-    voiceRecognition.interimResults = false;  
-    voiceRecognition.lang = 'zh-TW';          
+function setVoiceBtn(on) {
+    const btn = document.getElementById('voiceBtn');
+    if (!btn) return;
+    if (on) {
+        btn.innerHTML = "🛑";
+        btn.className = "bg-red-500 text-white border-red-600 w-10 rounded-lg shadow-sm animate-pulse text-lg flex items-center justify-center shrink-0 transition";
+    } else {
+        btn.innerHTML = "🎙️";
+        btn.className = "bg-white border border-slate-200 w-10 rounded-lg shadow-sm active:bg-slate-50 text-lg flex items-center justify-center shrink-0 transition";
+    }
+}
 
-    voiceRecognition.onstart = () => {
-        const btn = document.getElementById('voiceBtn');
-        if (btn) {
-            btn.innerHTML = "🛑";
-            btn.className = "bg-red-500 text-white border-red-600 w-10 rounded-lg shadow-sm animate-pulse text-lg flex items-center justify-center shrink-0 transition";
+// 每一輪都建立全新的 recognition（比 continuous 穩定很多）
+function createRecognition() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return null;
+
+    const r = new SR();
+    r.continuous = false;       // 一句話一輪，結束後自動開下一輪
+    r.interimResults = true;    // 邊說邊把文字顯示在搜尋框
+    r.lang = 'zh-TW';
+    r.maxAlternatives = 1;
+
+    r.onstart = () => setVoiceBtn(true);
+
+    r.onresult = (event) => {
+        let interim = '', finalText = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+            const t = event.results[i][0].transcript;
+            if (event.results[i].isFinal) finalText += t;
+            else interim += t;
+        }
+        const input = document.getElementById('searchInput');
+        if (finalText) {
+            const clean = finalText.trim().replace(/[。？，！,.?!]/g, '');
+            if (clean) handleVoiceCommand(clean);
+        } else if (interim && input) {
+            input.value = interim.trim();   // 即時更新搜尋框
         }
     };
 
-    voiceRecognition.onend = () => {
+    r.onerror = (e) => {
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+            isVoiceActive = false;
+            alert('請允許瀏覽器使用麥克風');
+        }
+        // no-speech / aborted / network：忽略，onend 會自動重開
+    };
+
+    r.onend = () => {
+        voiceRecognition = null;
         if (isVoiceActive) {
-            setTimeout(() => {
-                if (isVoiceActive) {
-                    try { voiceRecognition.start(); } catch (e) {}
-                }
-            }, 300);
+            clearTimeout(voiceRestartTimer);
+            voiceRestartTimer = setTimeout(startVoiceCycle, 250);
         } else {
-            const btn = document.getElementById('voiceBtn');
-            if (btn) {
-                btn.innerHTML = "🎙️";
-                btn.className = "bg-white border border-slate-200 w-10 rounded-lg shadow-sm active:bg-slate-50 text-lg flex items-center justify-center shrink-0 transition";
-            }
+            setVoiceBtn(false);
         }
     };
+    return r;
+}
 
-    voiceRecognition.onresult = (event) => {
-        const currentResultIndex = event.resultIndex;
-        if (event.results[currentResultIndex].isFinal) {
-            let resultText = event.results[currentResultIndex][0].transcript.trim().replace(/[。？，！]/g, ""); 
-            if (resultText) handleVoiceCommand(resultText);
-        }
-    };
+function startVoiceCycle() {
+    if (!isVoiceActive) return;
+    voiceRecognition = createRecognition();
+    if (!voiceRecognition) return;
+    try {
+        voiceRecognition.start();
+    } catch (e) {
+        // 上一輪還沒完全結束，稍後再試
+        clearTimeout(voiceRestartTimer);
+        voiceRestartTimer = setTimeout(startVoiceCycle, 500);
+    }
 }
 
 window.toggleContinuousVoice = function() {
-    if (!voiceRecognition) initVoiceControl();
-    if (!voiceRecognition) { alert("此瀏覽器不支援語音辨識"); return; }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { alert("此瀏覽器不支援語音辨識"); return; }
+
     if (isVoiceActive) {
         isVoiceActive = false;
-        voiceRecognition.stop(); 
+        clearTimeout(voiceRestartTimer);
+        if (voiceRecognition) { try { voiceRecognition.abort(); } catch (e) {} }
+        setVoiceBtn(false);
     } else {
         isVoiceActive = true;
-        voiceRecognition.start(); 
+        document.getElementById('searchInput')?.blur();
+        startVoiceCycle();
     }
 };
 
 function handleVoiceCommand(cmd) {
-    if (cmd.includes("重新定位") || cmd.includes("清除搜尋") || cmd.includes("定位")) { clearSearchAndLocate(); return; }
-    if (cmd.includes("我的收藏") || cmd.includes("收藏")) { switchTab('fav'); return; }
-    if (cmd.includes("附近推薦") || cmd.includes("推薦") || cmd.includes("附近")) { switchTab('search'); return; }
-    if (cmd.includes("結束導航") || cmd.includes("停止導航") || cmd.includes("關閉導航")) { stopNavigation(); return; }
-
-    let searchKeyword = cmd;
-    if (cmd.startsWith("搜尋") || cmd.startsWith("尋找") || cmd.startsWith("我要找") || cmd.startsWith("幫我找")) {
-        searchKeyword = cmd.replace(/^(搜尋|尋找|我要找|幫我找)/, "").trim();
+    // 指令只在「整句很短」時才觸發，避免「台北車站附近」被誤判成切換分頁
+    const short = cmd.length <= 8;
+    if (short) {
+        if (/重新定位|清除搜尋|^定位$/.test(cmd)) { clearSearchAndLocate(); return; }
+        if (/^(我的)?收藏$/.test(cmd)) { switchTab('fav'); return; }
+        if (/^(附近)?推薦$|^附近$/.test(cmd)) { switchTab('search'); return; }
+        if (/結束導航|停止導航|關閉導航/.test(cmd)) { stopNavigation(); return; }
     }
+
+    const searchKeyword = cmd.replace(/^(搜尋|尋找|我要找|幫我找)/, "").trim();
     if (searchKeyword) {
         const inputEl = document.getElementById('searchInput');
         if (inputEl) { inputEl.value = searchKeyword; searchLocation(); }
     }
 }
-
 let parkedMarker = null;
 let parkedInterval = null;
 
