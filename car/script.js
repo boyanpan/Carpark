@@ -415,6 +415,23 @@ async function fetchGooglePlacesFromBackend(queryStr) {
 // ==========================================
 // 5. 搜尋功能
 // ==========================================
+// 後端搜尋失敗時的備援：直接用瀏覽器端的 Google Places（和下拉聯想同一套服務）
+function clientPlaceSearch(q) {
+    return new Promise(resolve => {
+        try {
+            const svc = new google.maps.places.PlacesService(document.createElement('div'));
+            const req = { query: q, fields: ['name', 'geometry', 'formatted_address'] };
+            if (userLocation) req.locationBias = { center: { lat: userLocation[0], lng: userLocation[1] }, radius: 30000 };
+            svc.findPlaceFromQuery(req, (res, status) => {
+                if (status === google.maps.places.PlacesServiceStatus.OK && res && res[0] && res[0].geometry) {
+                    const p = res[0];
+                    resolve({ name: p.name, lat: p.geometry.location.lat(), lng: p.geometry.location.lng(), address: p.formatted_address || '' });
+                } else resolve(null);
+            });
+        } catch (e) { resolve(null); }
+    });
+}
+
 async function searchLocation() {
     document.body.classList.remove('is-searching');
     const queryInput = document.getElementById('searchInput');
@@ -446,7 +463,11 @@ async function searchLocation() {
     if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">🌍 正在 Google 地圖搜尋「${esc(rawQuery)}」...</div>`;
     
     try {
-        const data = await fetchGooglePlacesFromBackend(rawQuery);
+        let data = await fetchGooglePlacesFromBackend(rawQuery);
+        if (!data || data.length === 0) {
+            const p = await clientPlaceSearch(rawQuery);
+            if (p) data = [p];
+        }
         if (data && data.length > 0) {
             const place = data[0];
             searchedLocation = [parseFloat(place.lat), parseFloat(place.lng)];
@@ -981,6 +1002,8 @@ function createRecognition() {
         if (!text) return;
 
         showVoiceHint('👂 ' + text);
+        r._last = text;
+        if (finalText) r._gotFinal = true;
 
         // 待機中：任何一個候選字串含喚醒詞就喚醒
         if (voiceMode === 'standby') {
@@ -1018,6 +1041,11 @@ function createRecognition() {
 
     r.onend = () => {
         voiceRecognition = null;
+        // 有些手機不會送 final 結果：這時把最後一句辨識文字當成指令
+        if (!r._gotFinal && r._last && (voiceMode === 'active' || voiceMode === 'free')) {
+            const c = r._last.replace(WAKE_RE, '').replace(/[。？，！,.?!]/g, '').trim();
+            if (c) { handleVoiceCommand(c); backToStandby(); }
+        }
         if (voiceMode !== 'off') {
             clearTimeout(voiceRestartTimer);
             voiceRestartTimer = setTimeout(startVoiceCycle, voiceLastError ? 800 : 60);
@@ -1108,6 +1136,7 @@ function handleVoiceCommand(cmd) {
 
     const searchKeyword = cmd.replace(/^(搜尋|尋找|我要找|幫我找)/, "").trim();
     if (searchKeyword) {
+        showVoiceHint('🔍 搜尋：' + searchKeyword);
         const inputEl = document.getElementById('searchInput');
         if (inputEl) { inputEl.value = searchKeyword; searchLocation(); }
     }
