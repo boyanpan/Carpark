@@ -871,17 +871,35 @@ function buildSmartTransitBadge(item) {
 // 12. 語音控制（喚醒詞 + 指令）與愛車計時
 // ==========================================
 
-// 喚醒詞（可自行增減；辨識常把「P」聽成「皮」「批」，所以都列進去）
-const WAKE_RE = /(嗨|哈囉|hey|hi|你好)?\s*(小\s*p|小皮|小批|p\s*finder|皮\s*finder)/i;
+// 喚醒詞：把「P」常被聽成的字都列進去，也可自行增減
+const WAKE_RE = /(嗨|哈囉|哈嘍|hey|hi|你好)?[\s，,]*(小\s*(?:p|pi|皮|批|比|匹|屁|痞|琵|披|啤|劈|派)|p\s*finder|皮\s*finder|停車助手|停車小幫手)/i;
 const ACTIVE_WINDOW_MS = 8000;      // 喚醒後等指令的時間
 
 let voiceRecognition = null;
-let voiceMode = 'off';              // off | standby | active
+let voiceMode = 'off';              // off | standby（要喚醒詞）| active（已喚醒）| free（免喚醒）
 let voiceRestartTimer = null;
 let activeTimer = null;
 let voiceLastError = false;
 let voiceUserInitiated = false;
 let wakeLock = null;
+let hintTimer = null;
+
+// 畫面上方即時顯示「聽到什麼」，方便確認麥克風有沒有收到
+function showVoiceHint(text) {
+    let el = document.getElementById('voice-hint');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'voice-hint';
+        el.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(90px + env(safe-area-inset-bottom));' +
+            'max-width:90%;padding:8px 14px;border-radius:999px;background:rgba(15,23,42,.88);color:#fff;font-size:13px;' +
+            'font-weight:600;z-index:100001;pointer-events:none;transition:opacity .25s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+        document.body.appendChild(el);
+    }
+    el.textContent = text;
+    el.style.opacity = '1';
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => { el.style.opacity = '0'; }, 3500);
+}
 
 function setVoiceBtn(mode) {
     const btn = document.getElementById('voiceBtn');
@@ -890,6 +908,9 @@ function setVoiceBtn(mode) {
     if (mode === 'active') {
         btn.innerHTML = "🛑";
         btn.className = base + "bg-red-500 text-white border-red-600 animate-pulse";
+    } else if (mode === 'free') {
+        btn.innerHTML = "🗣️";
+        btn.className = base + "bg-green-50 border border-green-400";
     } else if (mode === 'standby') {
         btn.innerHTML = "👂";
         btn.className = base + "bg-blue-50 border border-blue-300";
@@ -898,9 +919,13 @@ function setVoiceBtn(mode) {
         btn.className = base + "bg-white border border-slate-200 active:bg-slate-50";
     }
     const input = document.getElementById('searchInput');
-    if (input) input.placeholder = mode === 'active'
-        ? '請說出指令…'
-        : (mode === 'standby' ? '說「嗨小P」開始語音搜尋' : '搜尋停車場、地點或醫院');
+    if (input) {
+        input.placeholder =
+            mode === 'active'  ? '請說出指令…' :
+            mode === 'standby' ? '說「嗨小P」開始語音搜尋' :
+            mode === 'free'    ? '免喚醒：直接說要搜尋的地點' :
+                                 '搜尋停車場、地點或醫院';
+    }
 }
 
 async function holdScreen(on) {
@@ -918,7 +943,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 function enterActive() {
-    if (voiceMode === 'off') return;
+    if (voiceMode !== 'standby') return;
     voiceMode = 'active';
     setVoiceBtn('active');
     if (navigator.vibrate) navigator.vibrate(60);
@@ -928,7 +953,7 @@ function enterActive() {
 
 function backToStandby() {
     clearTimeout(activeTimer);
-    if (voiceMode === 'off') return;
+    if (voiceMode !== 'active') return;     // 免喚醒 / 關閉時不動
     voiceMode = 'standby';
     setVoiceBtn('standby');
 }
@@ -938,29 +963,32 @@ function createRecognition() {
     if (!SR) return null;
 
     const r = new SR();
-    r.continuous = false;       // 一句一輪，結束後自動重開（比 continuous 穩）
+    r.continuous = false;       // 一句一輪，結束後自動快速重開
     r.interimResults = true;
     r.lang = 'zh-TW';
-    r.maxAlternatives = 1;
+    r.maxAlternatives = 3;      // 多拿幾個候選，喚醒詞比較容易命中
 
     r.onresult = (event) => {
         voiceLastError = false;
-        let interim = '', finalText = '';
+        let interim = '', finalText = '', alts = '';
         for (let i = event.resultIndex; i < event.results.length; i++) {
-            const t = event.results[i][0].transcript;
-            if (event.results[i].isFinal) finalText += t; else interim += t;
+            const res = event.results[i];
+            const t = res[0].transcript;
+            if (res.isFinal) finalText += t; else interim += t;
+            for (let k = 0; k < res.length; k++) alts += ' ' + res[k].transcript;
         }
         const text = (finalText || interim).trim();
         if (!text) return;
 
-        // 待機中：沒聽到喚醒詞就完全忽略
+        showVoiceHint('👂 ' + text);
+
+        // 待機中：任何一個候選字串含喚醒詞就喚醒
         if (voiceMode === 'standby') {
-            if (!WAKE_RE.test(text)) return;
+            if (!WAKE_RE.test(text) && !WAKE_RE.test(alts)) return;
             enterActive();
         }
-        if (voiceMode !== 'active') return;
+        if (voiceMode !== 'active' && voiceMode !== 'free') return;
 
-        // 去掉喚醒詞，剩下的才是指令
         const stripped = text.replace(WAKE_RE, '').replace(/^[\s，,。]+/, '').trim();
         const input = document.getElementById('searchInput');
 
@@ -982,15 +1010,17 @@ function createRecognition() {
             localStorage.setItem('p_voice_enabled', '0');
             stopVoice();
             if (voiceUserInitiated) alert('請允許瀏覽器使用麥克風');
+        } else if (e.error === 'network') {
+            showVoiceHint('⚠️ 語音服務連不上，請檢查網路');
         }
-        // no-speech / aborted / network：忽略，onend 會重開
+        // no-speech / aborted：忽略，onend 會重開
     };
 
     r.onend = () => {
         voiceRecognition = null;
         if (voiceMode !== 'off') {
             clearTimeout(voiceRestartTimer);
-            voiceRestartTimer = setTimeout(startVoiceCycle, voiceLastError ? 1000 : 250);
+            voiceRestartTimer = setTimeout(startVoiceCycle, voiceLastError ? 800 : 60);
         }
     };
     return r;
@@ -998,25 +1028,28 @@ function createRecognition() {
 
 function startVoiceCycle() {
     if (voiceMode === 'off') return;
+    if (voiceRecognition) return;           // 已經在聽，避免重複啟動
     voiceRecognition = createRecognition();
     if (!voiceRecognition) return;
     try {
         voiceRecognition.start();
     } catch (e) {
+        voiceRecognition = null;
         clearTimeout(voiceRestartTimer);
-        voiceRestartTimer = setTimeout(startVoiceCycle, 800);
+        voiceRestartTimer = setTimeout(startVoiceCycle, 600);
     }
 }
 
-function startVoice(fromUser) {
+function startVoice(fromUser, mode) {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { if (fromUser) alert("此瀏覽器不支援語音辨識"); return; }
+    mode = mode || 'standby';
     voiceUserInitiated = !!fromUser;
-    voiceMode = 'standby';
+    voiceMode = mode;
     voiceLastError = false;
-    localStorage.setItem('p_voice_enabled', '1');
+    localStorage.setItem('p_voice_enabled', mode === 'free' ? '2' : '1');
     document.getElementById('searchInput')?.blur();
-    setVoiceBtn('standby');
+    setVoiceBtn(mode);
     holdScreen(true);
     startVoiceCycle();
 }
@@ -1031,23 +1064,34 @@ function stopVoice() {
     holdScreen(false);
 }
 
-// 按鈕：開 / 關
+// 按鈕循環：🎙️ 關閉 → 👂 喚醒詞模式 → 🗣️ 免喚醒模式 → 關閉
 window.toggleContinuousVoice = function() {
     if (voiceMode === 'off') {
-        startVoice(true);
+        startVoice(true, 'standby');
+        showVoiceHint('👂 喚醒詞模式：說「嗨小P」');
+    } else if (voiceMode === 'standby' || voiceMode === 'active') {
+        clearTimeout(activeTimer);
+        voiceMode = 'free';
+        localStorage.setItem('p_voice_enabled', '2');
+        setVoiceBtn('free');
+        showVoiceHint('🗣️ 免喚醒模式：直接說地點');
     } else {
         localStorage.setItem('p_voice_enabled', '0');
         stopVoice();
+        showVoiceHint('🎙️ 語音已關閉');
     }
 };
 
-// 重開頁面時自動恢復語音待機
+// 重開頁面時自動恢復上次的語音模式
 function autoStartVoice() {
-    if (localStorage.getItem('p_voice_enabled') !== '1') return;
-    startVoice(false);
+    const saved = localStorage.getItem('p_voice_enabled');
+    if (saved !== '1' && saved !== '2') return;
+    const mode = saved === '2' ? 'free' : 'standby';
+    startVoice(false, mode);
     // 若瀏覽器因為沒有手勢而擋掉，第一次碰畫面時再啟動
     document.addEventListener('pointerdown', () => {
-        if (voiceMode === 'off' && localStorage.getItem('p_voice_enabled') === '1') startVoice(false);
+        const s = localStorage.getItem('p_voice_enabled');
+        if (voiceMode === 'off' && (s === '1' || s === '2')) startVoice(false, s === '2' ? 'free' : 'standby');
     }, { once: true });
 }
 
