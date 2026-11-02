@@ -28,6 +28,7 @@ let userMarker = null, searchedLocation = null, destMarker = null, radiusCircle 
 let isNavigating = false, currentDestination = null, currentTab = 'search';
 let favorites = JSON.parse(localStorage.getItem('p_favs')) || [];
 let currentSortMode = 'distance';
+let currentVehicle = localStorage.getItem('p_vehicle') === 'moto' ? 'moto' : 'car';   // car | moto
 window.markersMap = {}; 
 
 const bottomSheet = document.getElementById('bottom-sheet');
@@ -41,6 +42,55 @@ function isLandscapePhone() {
 }
 function isSheetMode() {
     return window.innerWidth < 768 && !isLandscapePhone();
+}
+
+// ---------- 車種（汽車 / 機車）----------
+// 目前選擇車種的車位資料：{ t: 總數, a: 剩餘（-1 = 無資料） }
+function veh(item) {
+    return currentVehicle === 'moto' ? item.motor : item.car;
+}
+function vehLabel() {
+    return currentVehicle === 'moto' ? '機車' : '汽車';
+}
+function hasVehSpots(item) {
+    const v = veh(item);
+    return v.t > 0 || v.a >= 0;
+}
+function syncVehicleUI() {
+    ['car', 'moto'].forEach(k => {
+        const b = document.getElementById('veh-' + k);
+        if (!b) return;
+        b.classList.toggle('active', currentVehicle === k);
+        b.setAttribute('aria-pressed', currentVehicle === k ? 'true' : 'false');
+    });
+}
+window.setVehicle = function(v) {
+    currentVehicle = (v === 'moto') ? 'moto' : 'car';
+    localStorage.setItem('p_vehicle', currentVehicle);
+    syncVehicleUI();
+    closePopup();
+    handleFilter();
+};
+syncVehicleUI();
+
+// 導航參數只帶必要欄位（避免 onclick 塞整包資料；也處理單引號）
+function navArgOf(item) {
+    return encodeURIComponent(JSON.stringify({ name: item.name, lat: item.lat, lng: item.lng }))
+        .replace(/'/g, '%27');
+}
+
+// 特殊車位標記：有這種車格才顯示；有即時空位寫「剩/總」，沒有就只寫格數
+function buildSpecialChips(item) {
+    const defs = [['♿', '身障', 'handicap'], ['🤰', '婦幼', 'pregnancy'], ['🔌', '電動車', 'ev']];
+    const chips = defs.map(([icon, label, key]) => {
+        const s = item.special && item.special[key];
+        if (!s || !(s.t > 0 || s.a >= 0)) return '';
+        let num;
+        if (s.a >= 0) num = s.t > 0 ? `${s.a}/${s.t}` : `${s.a}`;
+        else num = `${s.t}格`;
+        return `<span class="pk-chip c-${key}">${icon} ${label} ${num}</span>`;
+    }).join('');
+    return chips ? `<div class="pk-chips">${chips}</div>` : '';
 }
 
 function setUIHidden(hidden) {
@@ -327,7 +377,7 @@ function smartMatch(targetStr, queryStr) {
 }
 
 // ==========================================
-// 4. 車位資料與模擬器
+// 4. 車位資料
 // ==========================================
 async function fetchTaipeiParkingData() {
     try {
@@ -345,10 +395,12 @@ async function fetchTaipeiParkingData() {
         if (!res.ok) throw new Error("伺服器回應錯誤");
         
         const result = await res.json();
-        const mockPrices = ["20元/時", "30元/時", "40元/時", "50元/時", "60元/時", "💰 免費停車"];
+
+        // 後端沒有資料（null / -9）一律用 -1 代表「無資料」
+        const left = (v) => (v === null || v === undefined || Number(v) < 0) ? -1 : Number(v);
+        const total = (v) => Number(v) > 0 ? Number(v) : 0;
 
         parkingData = (result.nearby || []).map((p, index) => {
-            const availCar = p.availablecar !== null ? p.availablecar : -1;
             let mockTransit = null;
             let distToDest = 999;
             
@@ -375,9 +427,10 @@ async function fetchTaipeiParkingData() {
                 }
             }
 
-            const rawPayex = p.payex || "現場公告";
-            const finalPayex = (rawPayex === "現場公告" || rawPayex === "" || rawPayex === "無") 
-                ? mockPrices[index % mockPrices.length] 
+            // 沒有費率資料就如實顯示，不再用假價格補
+            const rawPayex = (p.payex || '').trim();
+            const finalPayex = (!rawPayex || rawPayex === '現場公告' || rawPayex === '無')
+                ? '費率以現場公告為準'
                 : rawPayex;
 
             return {
@@ -389,9 +442,13 @@ async function fetchTaipeiParkingData() {
                 address: p.address || '無地址',
                 payex: finalPayex,
                 category: p.category || '一般停車場',
-                prediction: availCar <= 0 ? (availCar < 0 ? "無預測資料" : "已客滿") : "車位充足",
-                car: { t: p.totalcar || 0, a: availCar },
-                left: Math.max(0, availCar),
+                car:   { t: total(p.totalcar),   a: left(p.availablecar) },
+                motor: { t: total(p.totalmotor), a: left(p.availablemotor) },
+                special: {
+                    handicap:  { t: total(p.totalhandicap),  a: left(p.availablehandicap) },
+                    pregnancy: { t: total(p.totalpregnancy), a: left(p.availablepregnancy) },
+                    ev:        { t: total(p.totalev),        a: left(p.availableev) }
+                },
                 transit: p.transit || mockTransit 
             };
         });
@@ -514,6 +571,9 @@ window.changeSortMode = function() {
 function handleFilter() {
     if (parkingData.length === 0) return;
     let data = (currentTab === 'search') ? [...parkingData] : parkingData.filter(p => favorites.includes(p.id));
+
+    // 車種篩選：只留下有這種車位的停車場
+    data = data.filter(hasVehSpots);
     
     const radiusSelect = document.getElementById('radiusSelect');
     const radiusMeters = radiusSelect ? parseFloat(radiusSelect.value) : 99999;
@@ -582,22 +642,24 @@ window.highlightCardInList = function(id) {
 
 let popupOpen = false;
 
+// 地圖彈窗：只留 剩餘車位 / 名稱 / 地址 / 費率 / 特殊車位 / 導航
 function openMarkerPopup(item, marker) {
-    const state = availState(item.car.a);
-    const navArg = encodeURIComponent(JSON.stringify(item));
+    const v = veh(item);
+    const state = availState(v.a);
     const html = `
         <div class="pk-pop">
             <button class="pk-close" onclick="closePopup()" aria-label="關閉">✕</button>
             <div class="pk-pop-head is-${state}">
-                <strong>${state === 'nodata' ? '—' : item.car.a}</strong>
-                <span>${STATE_TEXT[state]}<br><em>共 ${item.car.t} 位</em></span>
+                <strong>${state === 'nodata' ? '—' : v.a}</strong>
+                <span>${vehLabel()}${STATE_TEXT[state]}<br><em>共 ${v.t} 位</em></span>
             </div>
-            <h3>${esc(item.name)}</h3>
-            <p class="pk-sub">${esc(item.category)}</p>
-            <p class="pk-addr">${esc(item.address)}</p>
-            <p class="pk-price">${esc(item.payex)}</p>
-            ${buildSmartTransitBadge(item)}
-            <button class="pk-go pk-go-wide" onclick="startNav('${navArg}')">開始導航</button>
+            <div class="pk-pop-body">
+                <h3>${esc(item.name)}</h3>
+                <p class="pk-addr">${esc(item.address)}</p>
+                <p class="pk-price">${esc(item.payex)}</p>
+                ${buildSpecialChips(item)}
+                <button class="pk-go pk-go-wide" onclick="startNav('${navArgOf(item)}')">開始導航</button>
+            </div>
         </div>`;
     infoWindow.setContent(html);
     infoWindow.open(map, marker);
@@ -621,10 +683,11 @@ function renderMapMarkers(data) {
     window.markersMap = {}; 
 
     const markers = data.map(item => {
-        const state = availState(item.car.a);
+        const v = veh(item);
+        const state = availState(v.a);
         const el = document.createElement('div');
         el.className = `pk-pin is-${state}`;
-        el.textContent = state === 'nodata' ? 'P' : item.car.a;
+        el.textContent = state === 'nodata' ? 'P' : v.a;
 
         const marker = new google.maps.marker.AdvancedMarkerElement({
             position: { lat: item.lat, lng: item.lng },
@@ -646,43 +709,56 @@ function renderMapMarkers(data) {
     markerCluster.addMarkers(markers);
 }
 
+// 清單卡片：左邊汽車/機車各自的空位，右邊是名稱、距離、費率、特殊車位、轉乘
 function renderList(data, isUsingDest) {
     const listEl = document.getElementById('content-list');
     if (!listEl) return;
     if (!data.length) {
-        listEl.innerHTML = `<div class="pk-empty">這個範圍內沒有停車場<br><small>試著加大搜尋半徑</small></div>`;
+        listEl.innerHTML = `<div class="pk-empty">這個範圍內沒有${vehLabel()}停車場<br><small>試著加大搜尋半徑，或切換車種</small></div>`;
         return;
     }
 
+    const vrow = (item, key, icon) => {
+        const x = item[key];
+        const has = x.t > 0 || x.a >= 0;
+        const s = has ? availState(x.a) : 'nodata';
+        const sel = (key === 'motor') === (currentVehicle === 'moto');
+        const num = s === 'nodata' ? '—' : x.a;
+        return `<span class="pk-vrow is-${s} ${sel ? 'sel' : ''}"><i>${icon}</i><strong>${num}</strong></span>`;
+    };
+
     listEl.innerHTML = data.map((item, index) => {
-        const state = availState(item.car.a);
+        const v = veh(item);
+        const state = availState(v.a);
         const isTop = index === 0 && state !== 'full' && state !== 'nodata';
         const isFav = favorites.includes(item.id);
         const distLabel = isUsingDest ? '距目的地' : '距目前位置';
         const dist = item.distance != null ? `${item.distance.toFixed(2)} km` : '';
-        const navArg = encodeURIComponent(JSON.stringify(item));
-        const big = state === 'nodata' ? 'P' : item.car.a;
         const id = esc(item.id);
+        const carTxt = item.car.a >= 0 ? `${item.car.a} 位` : '無資料';
+        const motoTxt = item.motor.a >= 0 ? `${item.motor.a} 位` : '無資料';
 
         return `
         <article id="card-${id}" class="parking-card pk-card is-${state} ${isTop ? 'top-card' : ''}">
-            <button class="pk-avail" onclick="selectCard('${id}', ${item.lat}, ${item.lng})" aria-label="查看 ${esc(item.name)}">
-                <strong>${big}</strong>
-                <span>${STATE_TEXT[state]}</span>
-                <em>共 ${item.car.t}</em>
+            <button class="pk-avail" onclick="selectCard('${id}', ${item.lat}, ${item.lng})"
+                aria-label="${esc(item.name)}：汽車空位 ${carTxt}，機車空位 ${motoTxt}">
+                ${vrow(item, 'car', '🚗')}
+                ${vrow(item, 'motor', '🛵')}
+                <em class="pk-cap">空位</em>
             </button>
             <div class="pk-body" onclick="selectCard('${id}', ${item.lat}, ${item.lng})">
                 <div class="pk-title">
                     <h3>${esc(item.name)}</h3>
                     ${isTop ? `<span class="pk-badge">${currentSortMode === 'price' ? '最便宜' : '最近'}</span>` : ''}
                 </div>
-                <p class="pk-sub">${esc(item.category)} ${distLabel} ${dist}</p>
+                <p class="pk-sub">${distLabel} ${dist}</p>
                 <p class="pk-price">${esc(item.payex)}</p>
-                ${buildSmartTransitBadge(item)}
+                ${buildSpecialChips(item)}
+                ${buildSmartTransitBadge(item, true)}
             </div>
             <div class="pk-actions">
                 <button class="pk-fav" onclick="toggleFav('${id}')" aria-label="收藏">${isFav ? '🩷' : '🤍'}</button>
-                <button class="pk-go" onclick="startNav('${navArg}')">導航</button>
+                <button class="pk-go" onclick="startNav('${navArgOf(item)}')">導航</button>
             </div>
         </article>`;
     }).join('');
@@ -876,7 +952,8 @@ function createSearchMarker(name, lat, lng, address = "") {
     map.setZoom(16);
 }
 
-function buildSmartTransitBadge(item) {
+// 轉乘估算：compact = true 時只留一行（清單用）
+function buildSmartTransitBadge(item, compact) {
     if (!item || !item.transit) return '';
     const L = { walk: ['🚶', '步行'], youbike: ['🚲', 'YouBike'], mrt: ['🚇', '捷運'], bus: ['🚌', '公車'] };
     const [icon, label] = L[item.transit.mode] || L.walk;
@@ -884,7 +961,7 @@ function buildSmartTransitBadge(item) {
         <div class="pk-transit t-${item.transit.mode}">
             <span class="pk-t-icon">${icon}</span>
             <span><b>${label} 約 ${item.transit.time} 分</b>（估算）
-            ${item.transit.desc ? `<small>${esc(item.transit.desc)}</small>` : ''}</span>
+            ${(!compact && item.transit.desc) ? `<small>${esc(item.transit.desc)}</small>` : ''}</span>
         </div>`;
 }
 
@@ -1131,6 +1208,8 @@ function handleVoiceCommand(cmd) {
         if (/重新定位|清除搜尋|^定位$/.test(cmd)) { clearSearchAndLocate(); return; }
         if (/^(我的)?收藏$/.test(cmd)) { switchTab('fav'); return; }
         if (/^(附近)?推薦$|^附近$/.test(cmd)) { switchTab('search'); return; }
+        if (/^(切換)?(找)?機車(位)?$/.test(cmd)) { setVehicle('moto'); showVoiceHint('🛵 已切換：機車'); return; }
+        if (/^(切換)?(找)?汽車(位)?$/.test(cmd)) { setVehicle('car'); showVoiceHint('🚗 已切換：汽車'); return; }
         if (/結束導航|停止導航|關閉導航/.test(cmd)) { stopNavigation(); return; }
     }
 

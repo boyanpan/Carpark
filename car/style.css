@@ -310,3 +310,69 @@ body.is-searching #search-panel {
     .pk-actions .pk-go { flex: none; height: auto; }
     .pk-fav { width: 34px; height: 34px; border: 0; }
 }
+/* ==========================================================
+   style_patch2.css — 整段貼在 style.css「最最後面」（在 style_patch 之後）
+   內容：車種切換、卡片左側汽車/機車空位、特殊車位標籤、地圖彈窗不再能捲動
+   ========================================================== */
+
+/* ---------- 車種切換（汽車 / 機車）---------- */
+.veh-toggle {
+    display: flex; gap: 4px; margin-top: 10px; padding: 3px;
+    border-radius: 12px; background: var(--mist); border: 1px solid var(--line);
+}
+.veh-toggle button {
+    flex: 1; height: 34px; border-radius: 9px; font-size: 13px; font-weight: 700; color: var(--sub);
+    transition: background .15s, color .15s, box-shadow .15s;
+}
+.veh-toggle button.active {
+    background: #fff; color: var(--sign-dark); box-shadow: 0 1px 4px rgba(15, 23, 42, .18);
+}
+
+/* ---------- 卡片左側：汽車 / 機車各自的空位 ---------- */
+.pk-card { grid-template-columns: 68px 1fr; }
+.pk-avail {
+    background: var(--mist); color: var(--text); gap: 5px; padding: 6px 5px; justify-content: center;
+}
+.pk-vrow {
+    display: flex; align-items: center; justify-content: center; gap: 5px; width: 100%;
+    padding: 4px 0; border-radius: 10px; background: var(--cb); color: var(--c); opacity: .8;
+}
+.pk-vrow i { font-style: normal; font-size: 13px; line-height: 1; }
+.pk-vrow strong { font-size: 16px; line-height: 1; font-weight: 800; }
+.pk-vrow.sel { opacity: 1; box-shadow: 0 0 0 2px var(--c); }
+.pk-vrow.sel strong { font-size: 21px; }
+.pk-cap { font-size: 10px; opacity: .6; }
+
+/* ---------- 特殊車位標籤（身障 / 婦幼 / 電動車）---------- */
+.pk-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.pk-chip {
+    padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap;
+    background: var(--mist); color: var(--ink);
+}
+.pk-chip.c-handicap  { background: #e8efff; color: #1e40af; }
+.pk-chip.c-pregnancy { background: #fde8f1; color: #be185d; }
+.pk-chip.c-ev        { background: #e6f5ec; color: #15803d; }
+
+/* ---------- 地圖彈窗：內容剛好、不能捲動 ----------
+   原本「開始導航」按鈕 width:100% 又加左右 margin，比框還寬才會出現橫向捲動；
+   這裡改成外框不留邊、內層 .pk-pop-body 用 padding。 */
+.gm-style .gm-style-iw-c { padding: 0 !important; max-height: none !important; overflow: hidden !important; }
+.gm-style .gm-style-iw-d { overflow: hidden !important; max-height: none !important; }
+.pk-pop { width: 240px; padding: 0; box-sizing: border-box; }
+.pk-pop > .pk-pop-body { margin: 0; padding: 12px 14px 14px; box-sizing: border-box; }
+.pk-pop-head { padding: 12px 52px 12px 14px; }
+.pk-pop h3 { margin: 0 0 2px; font-size: 16px; line-height: 1.35; }
+.pk-pop .pk-addr {
+    margin: 0; font-size: 12px; color: var(--sub);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pk-pop .pk-price { margin: 6px 0 0; }
+.pk-pop .pk-chips { margin-top: 8px; }
+.pk-pop .pk-go-wide { display: block; width: 100%; box-sizing: border-box; margin: 12px 0 0; padding: 11px; }
+
+/* ---------- 手機橫向 ---------- */
+@media (orientation: landscape) and (max-height: 500px) {
+    .veh-toggle { margin-top: 6px; }
+    .veh-toggle button { height: 28px; }
+    .pk-card { grid-template-columns: 68px 1fr auto; }
+}

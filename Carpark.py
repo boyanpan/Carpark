@@ -1,5 +1,6 @@
 import os
 import re
+from sched import scheduler
 import time
 import math
 import datetime
@@ -149,6 +150,53 @@ def categorize_parking(name: str) -> str:
     return '一般停車場'
 
 
+def spot_avail(v):
+    """即時剩餘數：-9（沒有這種車格）、缺值、無法轉數字 → None"""
+    v = clean(v)
+    if v is None:
+        return None
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return None
+    return n if n >= 0 else None
+ 
+ 
+def spot_total(v):
+    """總格數：0 / 負數 / 缺值 → None（代表沒有這種車格）"""
+    n = spot_avail(v)
+    return n if n and n > 0 else None
+ 
+ 
+_EV_IDLE = ('空閒', '待機', '可使用', '可用', 'available', 'idle', 'standby')
+_EV_BUSY = ('充電', '使用', '佔用', '占用', '故障', '離線', '預約', 'charging', 'busy', 'occupied', 'fault', 'offline')
+ 
+ 
+def parse_ev(desc_count, charge_station):
+    """回傳 (充電槍總數, 目前可用數)；沒有資料的欄位為 None。
+    可用數只有在「每支槍的狀態都能判讀」時才給，避免顯示錯誤數字。"""
+    sockets = []
+    if isinstance(charge_station, dict):
+        sockets = charge_station.get('scoketStatusList') or []
+    elif isinstance(charge_station, list):
+        sockets = charge_station
+    sockets = [s for s in sockets if isinstance(s, dict)]
+ 
+    total = max(len(sockets), spot_total(desc_count) or 0) or None
+    avail = None
+    if sockets:
+        idle = busy = 0
+        for s in sockets:
+            st = str(s.get('spot_status', '')).strip().lower()
+            if any(k in st for k in _EV_IDLE):
+                idle += 1
+            elif any(k in st for k in _EV_BUSY):
+                busy += 1
+        if idle + busy == len(sockets):
+            avail = idle
+    return total, avail
+ 
+ 
 def sync_data_to_db():
     print("[INFO] 開始同步最新資料至雲端資料庫...")
     try:
@@ -157,30 +205,46 @@ def sync_data_to_db():
         df_desc = pd.DataFrame(desc["data"]["park"])
         df_avail = pd.DataFrame(avail["data"]["park"])
         df = pd.merge(df_desc, df_avail, on="id", how="left")
-
+ 
         values = []
         skipped = 0
         for _, row in df.iterrows():
             try:
                 lng, lat = TRANSFORMER.transform(float(row["tw97x"]), float(row["tw97y"]))
                 p_name = str(row.get("name", ""))
+                ev_total, ev_avail = parse_ev(row.get('ChargingStation'), row.get('ChargeStation'))
                 values.append((
                     row['id'], p_name, categorize_parking(p_name), clean(row.get('address')), lat, lng,
                     safe_num(row.get('availablecar')), safe_num(row.get('totalcar')),
-                    clean(row.get('payex')), extract_structure_type(row)
+                    clean(row.get('payex')), extract_structure_type(row),
+                    spot_total(row.get('totalmotor')), spot_avail(row.get('availablemotor')),
+                    spot_total(row.get('Handicap_First')), spot_avail(row.get('availablehandicap')),
+                    spot_total(row.get('Pregnancy_First')), spot_avail(row.get('availablepregnancy')),
+                    ev_total, ev_avail,
                 ))
             except Exception as e:
                 skipped += 1
                 if skipped <= 3:
                     print(f"[WARN] 略過一筆資料: {type(e).__name__}: {e}")
-
+ 
         sql = """
-            INSERT INTO parking_lots (id, name, category, address, lat, lng, available_car, total_car, payex, structure_type)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO parking_lots
+                (id, name, category, address, lat, lng, available_car, total_car, payex, structure_type,
+                 total_motor, available_motor, total_handicap, available_handicap,
+                 total_pregnancy, available_pregnancy, total_ev, available_ev)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
                 available_car = VALUES(available_car),
                 total_car = VALUES(total_car),
                 payex = VALUES(payex),
+                total_motor = VALUES(total_motor),
+                available_motor = VALUES(available_motor),
+                total_handicap = VALUES(total_handicap),
+                available_handicap = VALUES(available_handicap),
+                total_pregnancy = VALUES(total_pregnancy),
+                available_pregnancy = VALUES(available_pregnancy),
+                total_ev = VALUES(total_ev),
+                available_ev = VALUES(available_ev),
                 last_update = CURRENT_TIMESTAMP
         """
         conn = get_db_connection()
@@ -851,6 +915,14 @@ def nearby():
             "lng": float(r["lng"]) if r["lng"] else 0,
             "availablecar": r["available_car"],
             "totalcar": r["total_car"],
+            "availablemotor": r.get("available_motor"),
+            "totalmotor": r.get("total_motor"),
+            "availablehandicap": r.get("available_handicap"),
+            "totalhandicap": r.get("total_handicap"),
+            "availablepregnancy": r.get("available_pregnancy"),
+            "totalpregnancy": r.get("total_pregnancy"),
+            "availableev": r.get("available_ev"),
+            "totalev": r.get("total_ev"),
             "payex": r["payex"],
             "hourlyRate": parse_hourly_rate(r["payex"]),
             "structureType": r["structure_type"],
@@ -987,8 +1059,8 @@ def callback():
 
 user_states = {}
 
-PROMPT_RECOMMEND = ("📍 【目的地尋車】\n\n請輸入您想去的地點（例如：台北101、新莊體育館），"
-                    "或直接傳送「位置訊息」給我。\n\n想知道要停多久？可以一起說，例如「台北101 停3小時」。\n"
+PROMPT_RECOMMEND = ("📍 【目的地尋車】\n\n請輸入您想去的地點（例如：台北101），"
+                    "或直接傳送「位置訊息」給我。\n\n"
                     "(想退出請輸入「取消」)")
 PROMPT_TRANSIT = ("🚇 【轉乘建議】\n\n請輸入您要前往的目的地（例如：台北101），"
                   "或傳送「位置訊息」給我。\n如果附近停車場都客滿，我會推薦較遠但有位的停車場，"
@@ -1079,13 +1151,50 @@ def handle_message(event):
         reply(event, FALLBACK_REPLY)
 
 
-init_db()
-
-scheduler = BackgroundScheduler(daemon=True)
-scheduler.add_job(func=sync_data_to_db, trigger='interval', minutes=3, max_instances=1, coalesce=True)
-scheduler.add_job(func=sync_data_to_db, trigger='date', run_date=datetime.datetime.now() + datetime.timedelta(seconds=3))
-scheduler.start()
-print("[INFO] ⏱️ 背景自動更新排程已啟動")
+NEW_COLUMNS = {
+    "total_motor": "INT",
+    "available_motor": "INT",
+    "total_handicap": "INT",
+    "available_handicap": "INT",
+    "total_pregnancy": "INT",
+    "available_pregnancy": "INT",
+    "total_ev": "INT",
+    "available_ev": "INT",
+}
+ 
+ 
+def init_db():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS parking_lots (
+                id VARCHAR(50) PRIMARY KEY,
+                name VARCHAR(255),
+                category VARCHAR(100),
+                address TEXT,
+                lat DECIMAL(10, 8),
+                lng DECIMAL(11, 8),
+                available_car INT,
+                total_car INT,
+                payex TEXT,
+                structure_type VARCHAR(50),
+                last_update TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
+        """)
+        # 舊表沒有新欄位 → 逐一補上；已存在 (errno 1060) 就略過
+        for col, typ in NEW_COLUMNS.items():
+            try:
+                cursor.execute(f"ALTER TABLE parking_lots ADD COLUMN {col} {typ} NULL")
+            except mysql.connector.Error as e:
+                if e.errno != 1060:
+                    raise
+        conn.commit()
+        cursor.close()
+        conn.close()
+        print("[INFO] Aiven 資料表已準備就緒")
+    except Exception as e:
+        print(f"[ERROR] 資料庫初始化失敗: {e}")
 
 if __name__ == "__main__":
     try:
