@@ -663,7 +663,7 @@ def find_parking_near(place: str, only_available: bool = True, radius_m: int = 1
     """查詢某個地點附近的停車場，包含即時空位、費率、停2小時的粗估費用與距離。
 
     Args:
-        place: 目的地名稱，例如「台北101」、「新莊體育館」。
+        place: 目的地名稱，例如「台北101」。
         only_available: True 只列出目前有空位的停車場。
         radius_m: 搜尋半徑（公尺），預設 1000。
     """
@@ -1060,24 +1060,11 @@ def callback():
 user_states = {}
 
 PROMPT_RECOMMEND = ("📍 【目的地尋車】\n\n請輸入您想去的地點（例如：台北101），"
-                    "或直接傳送「位置訊息」給我。\n\n"
+                    "或直接傳送「位置訊息」給我。\n我會幫您找附近的停車場，並告訴您空位數、費率與距離。\n"
                     "(想退出請輸入「取消」)")
 PROMPT_TRANSIT = ("🚇 【轉乘建議】\n\n請輸入您要前往的目的地（例如：台北101），"
                   "或傳送「位置訊息」給我。\n如果附近停車場都客滿，我會推薦較遠但有位的停車場，"
                   "並告訴您怎麼搭 YouBike 或捷運過去。\n(想退出請輸入「取消」)")
-
-_HOURS_RE = re.compile(r'(?:停|約|大概)?\s*(\d+(?:\.\d+)?)\s*(?:個)?\s*小時')
-
-
-def split_hours(text: str):
-    """從「台北101 停3小時」拆出地名與小時數"""
-    m = _HOURS_RE.search(text)
-    if not m:
-        return text.strip(), 2.0
-    hours = min(float(m.group(1)), 24)
-    place = (text[:m.start()] + text[m.end():]).strip(" ，,、")
-    return place or text.strip(), hours
-
 
 def run_destination_flow(event, state, name, lat, lng, hours=2.0):
     try:
