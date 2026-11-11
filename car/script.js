@@ -29,6 +29,9 @@ let isNavigating = false, currentDestination = null, currentTab = 'search';
 let favorites = JSON.parse(localStorage.getItem('p_favs')) || [];
 let currentSortMode = 'distance';
 let currentVehicle = localStorage.getItem('p_vehicle') === 'moto' ? 'moto' : 'car';   // car | moto
+let searchSeq = 0;          // 搜尋流水號：連續快速搜尋時，只採用最新一次的結果
+let parkingFetchSeq = 0;    // 車位資料流水號：丟棄過期的回應
+let lastListData = [];      // 目前清單上的停車場（語音「導航」用）
 window.markersMap = {}; 
 
 const bottomSheet = document.getElementById('bottom-sheet');
@@ -380,6 +383,7 @@ function smartMatch(targetStr, queryStr) {
 // 4. 車位資料
 // ==========================================
 async function fetchTaipeiParkingData() {
+    const seq = ++parkingFetchSeq;      // 每次請求一個流水號，回來時若已過期就丟掉
     try {
         const listEl = document.getElementById('content-list');
         if (listEl && parkingData.length === 0) {
@@ -395,6 +399,7 @@ async function fetchTaipeiParkingData() {
         if (!res.ok) throw new Error("伺服器回應錯誤");
         
         const result = await res.json();
+        if (seq !== parkingFetchSeq) return;
 
         // 後端沒有資料（null / -9）一律用 -1 代表「無資料」
         const left = (v) => (v === null || v === undefined || Number(v) < 0) ? -1 : Number(v);
@@ -454,6 +459,7 @@ async function fetchTaipeiParkingData() {
         });
         handleFilter();
     } catch (err) {
+        if (seq !== parkingFetchSeq) return;
         const listEl = document.getElementById('content-list');
         if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">無法連接雲端伺服器</div>`;
     }
@@ -472,7 +478,7 @@ async function fetchGooglePlacesFromBackend(queryStr) {
 // ==========================================
 // 5. 搜尋功能
 // ==========================================
-// 後端搜尋失敗時的備援：直接用瀏覽器端的 Google Places（和下拉聯想同一套服務）
+// 瀏覽器端的 Google Places 搜尋（和下拉聯想同一套服務，通常最快）
 function clientPlaceSearch(q) {
     return new Promise(resolve => {
         try {
@@ -489,12 +495,27 @@ function clientPlaceSearch(q) {
     });
 }
 
+// 前端與後端同時查，誰先找到就用誰（兩個都找不到才算失敗）
+function findPlace(q) {
+    return new Promise(resolve => {
+        let pending = 2, done = false;
+        const finish = (p) => {
+            if (done) return;
+            if (p) { done = true; resolve(p); }
+            else if (--pending === 0) resolve(null);
+        };
+        clientPlaceSearch(q).then(finish).catch(() => finish(null));
+        fetchGooglePlacesFromBackend(q).then(d => finish(d && d[0] ? d[0] : null)).catch(() => finish(null));
+    });
+}
+
 async function searchLocation() {
     document.body.classList.remove('is-searching');
     const queryInput = document.getElementById('searchInput');
     let rawQuery = queryInput ? queryInput.value.trim() : "";
     if (!rawQuery) return clearSearchAndLocate();
-    
+
+    const mySeq = ++searchSeq;
     collapseBottomSheet();
 
     const autocompleteList = document.getElementById('autocomplete-list');
@@ -508,6 +529,7 @@ async function searchLocation() {
         if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-blue-500 font-bold">🔍 找到 ${localMatches.length} 筆相關地點...</div>`;
         window.currentKeyword = rawQuery;
         searchedLocation = null; 
+        if (destMarker) destMarker.map = null;
         handleFilter(); 
         
         const bounds = new google.maps.LatLngBounds();
@@ -520,25 +542,24 @@ async function searchLocation() {
     if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">🌍 正在 Google 地圖搜尋「${esc(rawQuery)}」...</div>`;
     
     try {
-        let data = await fetchGooglePlacesFromBackend(rawQuery);
-        if (!data || data.length === 0) {
-            const p = await clientPlaceSearch(rawQuery);
-            if (p) data = [p];
-        }
-        if (data && data.length > 0) {
-            const place = data[0];
+        const place = await findPlace(rawQuery);
+        if (mySeq !== searchSeq) return;        // 這段期間又搜尋了別的，這個結果作廢
+        if (place) {
             searchedLocation = [parseFloat(place.lat), parseFloat(place.lng)];
             createSearchMarker(place.name, searchedLocation[0], searchedLocation[1], place.address);
-            fetchTaipeiParkingData(); 
+            handleFilter();                     // 先用現有資料立刻重新排序，畫面馬上有反應
+            fetchTaipeiParkingData();           // 再到背景更新最新車位
         } else {
             if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">找不到「${esc(rawQuery)}」</div>`;
         }
     } catch (err) { 
+        if (mySeq !== searchSeq) return;
         if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500">搜尋失敗，請稍後再試</div>`;
     }
 }
 
 function clearSearchAndLocate() {
+    searchSeq++;
     document.body.classList.remove('is-searching');
     initCompass(); 
     const searchInput = document.getElementById('searchInput');
@@ -626,6 +647,7 @@ function handleFilter() {
          data.sort((a, b) => a.name.localeCompare(b.name));
     }
 
+    lastListData = data;
     renderMapMarkers(data);
     renderList(data, !!searchedLocation); 
 }
@@ -820,10 +842,12 @@ function initAutocomplete() {
         const name = place.name || searchInput.value;
         const address = place.formatted_address || "";
 
+        searchSeq++;
         searchedLocation = [lat, lng];
         window.currentKeyword = null; 
 
         createSearchMarker(name, lat, lng, address);
+        handleFilter();
         fetchTaipeiParkingData(); 
         collapseBottomSheet();
     });
@@ -966,37 +990,73 @@ function buildSmartTransitBadge(item, compact) {
 }
 
 // ==========================================
-// 12. 語音控制（喚醒詞 + 指令）與愛車計時
+// 12. 語音控制（流暢版）與愛車計時
 // ==========================================
+// 設計重點：
+//  1. 每一輪辨識都建立全新物件，說完（或停頓超過 COMMIT_IDLE_MS）就立刻送出指令並馬上重開，不等瀏覽器慢慢判斷
+//  2. 搜尋與聽下一句互不阻塞：搜尋還在跑的時候就可以直接說下一個
+//  3. 預設「免喚醒」：開著就一直聽，每說一句就執行一句；長按按鈕可切換成「喚醒詞模式」
+//  4. 看門狗：重開失敗、卡住、切回前景、網路恢復都會自動救回來
 
+const COMMIT_IDLE_MS = 700;         // 說話停頓這麼久就視為說完（越小越快，太小會把話切斷）
+const ACTIVE_WINDOW_MS = 8000;      // 喚醒詞模式：喚醒後等指令的時間
 // 喚醒詞：把「P」常被聽成的字都列進去，也可自行增減
 const WAKE_RE = /(嗨|哈囉|哈嘍|hey|hi|你好)?[\s，,]*(小\s*(?:p|pi|皮|批|比|匹|屁|痞|琵|披|啤|劈|派)|p\s*finder|皮\s*finder|停車助手|停車小幫手)/i;
-const ACTIVE_WINDOW_MS = 8000;      // 喚醒後等指令的時間
 
 let voiceRecognition = null;
-let voiceMode = 'off';              // off | standby（要喚醒詞）| active（已喚醒）| free（免喚醒）
+let voiceMode = 'off';              // off | free（免喚醒）| standby（等喚醒詞）| active（已喚醒）
+let voiceWakePref = localStorage.getItem('p_voice_wake') === '1';
+let voiceErrCount = 0;
 let voiceRestartTimer = null;
 let activeTimer = null;
-let voiceLastError = false;
+let hintTimer = null;
 let voiceUserInitiated = false;
 let wakeLock = null;
-let hintTimer = null;
+let lastCmd = '', lastCmdAt = 0;
+let voiceLongPressed = false;
 
-// 畫面上方即時顯示「聽到什麼」，方便確認麥克風有沒有收到
+// ---------- 小工具（純函式）----------
+function cleanSpeech(raw) {
+    return String(raw || '')
+        .replace(/[。？！，、；：,.?!;:~～…「」『』"'“”]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function stripWake(text) {
+    return text.replace(WAKE_RE, '').replace(/^[\s，,。]+/, '').trim();
+}
+
+// 把「我要去台北車站附近的停車場」變成「台北車站」
+function extractKeyword(cmd) {
+    const orig = cmd.trim();
+    let kw = orig
+        .replace(/^(?:請問|請|幫我|幫忙|麻煩|我想要|我想去|我要去|我想|我要|帶我去|導航到|導航去|搜尋|搜索|尋找|查詢|查一下|找一下|找|去|到)+/, '')
+        .replace(/(?:謝謝|拜託|一下|好嗎|吧)$/, '')
+        .replace(/(?:附近|周邊|旁邊|這邊|那邊)?的?(?:停車場|停車位|車位)$/, '')
+        .replace(/(?:附近|周邊|旁邊)$/, '')
+        .trim();
+    return kw || orig;
+}
+
+// ---------- 畫面提示 ----------
 function showVoiceHint(text) {
     let el = document.getElementById('voice-hint');
     if (!el) {
         el = document.createElement('div');
         el.id = 'voice-hint';
-        el.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(90px + env(safe-area-inset-bottom));' +
+        el.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);' +
             'max-width:90%;padding:8px 14px;border-radius:999px;background:rgba(15,23,42,.88);color:#fff;font-size:13px;' +
             'font-weight:600;z-index:100001;pointer-events:none;transition:opacity .25s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
         document.body.appendChild(el);
     }
+    // 手機：浮在清單抽屜上方；其他情況貼近底部
+    const sheetH = (isSheetMode() && !isNavigating && bottomSheet) ? Math.round(bottomSheet.getBoundingClientRect().height) + 12 : 24;
+    el.style.bottom = `calc(${sheetH}px + env(safe-area-inset-bottom))`;
     el.textContent = text;
     el.style.opacity = '1';
     clearTimeout(hintTimer);
-    hintTimer = setTimeout(() => { el.style.opacity = '0'; }, 3500);
+    hintTimer = setTimeout(() => { el.style.opacity = '0'; }, 3000);
 }
 
 function setVoiceBtn(mode) {
@@ -1004,7 +1064,7 @@ function setVoiceBtn(mode) {
     if (!btn) return;
     const base = "w-10 rounded-lg shadow-sm text-lg flex items-center justify-center shrink-0 transition ";
     if (mode === 'active') {
-        btn.innerHTML = "🛑";
+        btn.innerHTML = "🎤";
         btn.className = base + "bg-red-500 text-white border-red-600 animate-pulse";
     } else if (mode === 'free') {
         btn.innerHTML = "🗣️";
@@ -1016,14 +1076,21 @@ function setVoiceBtn(mode) {
         btn.innerHTML = "🎙️";
         btn.className = base + "bg-white border border-slate-200 active:bg-slate-50";
     }
+    btn.title = '點一下開關語音；長按切換「免喚醒 / 喚醒詞」模式';
     const input = document.getElementById('searchInput');
     if (input) {
         input.placeholder =
             mode === 'active'  ? '請說出指令…' :
             mode === 'standby' ? '說「嗨小P」開始語音搜尋' :
-            mode === 'free'    ? '免喚醒：直接說要搜尋的地點' :
+            mode === 'free'    ? '直接說要搜尋的地點…' :
                                  '搜尋停車場、地點或醫院';
     }
+}
+
+// 聽到有人說話時，按鈕外圈亮綠光
+function setMicActive(on) {
+    const btn = document.getElementById('voiceBtn');
+    if (btn) btn.style.boxShadow = on ? '0 0 0 4px rgba(34,197,94,.45)' : '';
 }
 
 async function holdScreen(on) {
@@ -1036,188 +1103,338 @@ async function holdScreen(on) {
         }
     } catch (e) { wakeLock = null; }
 }
-document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && voiceMode !== 'off') holdScreen(true);
-});
 
+// ---------- 喚醒詞模式的狀態切換 ----------
 function enterActive() {
     if (voiceMode !== 'standby') return;
     voiceMode = 'active';
     setVoiceBtn('active');
     if (navigator.vibrate) navigator.vibrate(60);
+    showVoiceHint('🎤 請說指令…');
     clearTimeout(activeTimer);
     activeTimer = setTimeout(backToStandby, ACTIVE_WINDOW_MS);
 }
 
 function backToStandby() {
     clearTimeout(activeTimer);
-    if (voiceMode !== 'active') return;     // 免喚醒 / 關閉時不動
+    if (voiceMode !== 'active') return;
     voiceMode = 'standby';
     setVoiceBtn('standby');
 }
 
+// ---------- 說話中即時顯示 ----------
+function showLive(raw) {
+    const text = cleanSpeech(raw);
+    if (!text) return;
+    const input = document.getElementById('searchInput');
+    const hasWake = WAKE_RE.test(text);
+
+    if (voiceMode === 'standby' && !hasWake) {
+        showVoiceHint('👂 ' + text);        // 沒喚醒詞，只顯示不處理
+        return;
+    }
+    const t = hasWake ? stripWake(text) : text;
+    if (t && input) input.value = t;
+    showVoiceHint('🎤 ' + (t || text));
+}
+
+// ---------- 送出一句話 ----------
+function commitSpeech(raw) {
+    const text = cleanSpeech(raw);
+    if (text.replace(/\s/g, '').length < 2) return;
+    if (/^(嗯+|恩+|啊+|呃+|喔+|哦+|欸+)$/.test(text)) return;
+    const now = Date.now();
+    if (text === lastCmd && now - lastCmdAt < 1500) return;      // 同一句短時間內不重複執行
+
+    const hasWake = WAKE_RE.test(text);
+    let cmd = hasWake ? stripWake(text) : text;
+
+    if (voiceMode === 'standby') {
+        if (!hasWake) return;                                      // 待機中：沒喚醒詞完全忽略
+        if (!cmd) { enterActive(); return; }                       // 只有喚醒詞：進入等指令
+    } else if (!cmd) {
+        return;
+    }
+
+    lastCmd = text; lastCmdAt = now;
+    handleVoiceCommand(cmd);
+    if (navigator.vibrate) navigator.vibrate(25);
+    if (voiceMode === 'active') backToStandby();
+}
+
+// ---------- 辨識器 ----------
 function createRecognition() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return null;
 
     const r = new SR();
-    r.continuous = false;       // 一句一輪，結束後自動快速重開
+    r.continuous = false;        // 一句一輪：比 continuous 穩定，重開成本很低
     r.interimResults = true;
     r.lang = 'zh-TW';
-    r.maxAlternatives = 3;      // 多拿幾個候選，喚醒詞比較容易命中
+    r.maxAlternatives = 1;
+    r._createdAt = Date.now();
+    r._done = false;
+    r._idle = null;
+    r._last = '';
 
-    r.onresult = (event) => {
-        voiceLastError = false;
-        let interim = '', finalText = '', alts = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-            const res = event.results[i];
-            const t = res[0].transcript;
-            if (res.isFinal) finalText += t; else interim += t;
-            for (let k = 0; k < res.length; k++) alts += ' ' + res[k].transcript;
+    // 送出並馬上中止這一輪（onend 會立刻開下一輪）
+    const finish = (raw) => {
+        if (r._done) return;
+        r._done = true;
+        r._doneAt = Date.now();
+        clearTimeout(r._idle);
+        try { commitSpeech(raw); }
+        finally { try { r.abort(); } catch (e) {} }
+    };
+
+    r.onstart = () => { r._startedAt = Date.now(); };
+    r.onspeechstart = () => setMicActive(true);
+    r.onspeechend = () => setMicActive(false);
+
+    r.onresult = (e) => {
+        if (r._done) return;
+        let txt = '', fin = false;
+        for (let i = 0; i < e.results.length; i++) {
+            txt += e.results[i][0].transcript;
+            fin = e.results[i].isFinal;
         }
-        const text = (finalText || interim).trim();
-        if (!text) return;
+        txt = txt.trim();
+        if (!txt) return;
 
-        showVoiceHint('👂 ' + text);
-        r._last = text;
-        if (finalText) r._gotFinal = true;
+        voiceErrCount = 0;
+        r._last = txt;
+        showLive(txt);
 
-        // 待機中：任何一個候選字串含喚醒詞就喚醒
-        if (voiceMode === 'standby') {
-            if (!WAKE_RE.test(text) && !WAKE_RE.test(alts)) return;
-            enterActive();
-        }
-        if (voiceMode !== 'active' && voiceMode !== 'free') return;
-
-        const stripped = text.replace(WAKE_RE, '').replace(/^[\s，,。]+/, '').trim();
-        const input = document.getElementById('searchInput');
-
-        if (finalText) {
-            const clean = stripped.replace(/[。？，！,.?!]/g, '');
-            if (clean) {
-                handleVoiceCommand(clean);
-                backToStandby();
-            }
-            // 只有喚醒詞、沒有指令：繼續等下一句
-        } else if (stripped && input) {
-            input.value = stripped;     // 邊說邊顯示
-        }
+        clearTimeout(r._idle);
+        if (fin) finish(txt);                                           // 瀏覽器判定說完 → 立刻送出
+        else r._idle = setTimeout(() => finish(txt), COMMIT_IDLE_MS);   // 停頓一下就直接送，不等 final
     };
 
     r.onerror = (e) => {
-        voiceLastError = true;
-        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-            localStorage.setItem('p_voice_enabled', '0');
-            stopVoice();
-            if (voiceUserInitiated) alert('請允許瀏覽器使用麥克風');
-        } else if (e.error === 'network') {
-            showVoiceHint('⚠️ 語音服務連不上，請檢查網路');
+        const code = e.error;
+        if (code === 'aborted' || code === 'no-speech') return;         // 正常情況，onend 會馬上重開
+        if (code === 'not-allowed' || code === 'service-not-allowed') {
+            if (voiceUserInitiated) {
+                stopVoice();
+                alert('請允許瀏覽器使用麥克風');
+            } else {
+                stopVoice(true);        // 自動啟動被擋：保留偏好，等使用者第一次點畫面再試
+            }
+            return;
         }
-        // no-speech / aborted：忽略，onend 會重開
+        if (code === 'audio-capture') {
+            stopVoice();
+            showVoiceHint('⚠️ 找不到可用的麥克風');
+            return;
+        }
+        voiceErrCount++;
+        if (code === 'network') showVoiceHint('⚠️ 語音服務連不上，重試中…');
     };
 
     r.onend = () => {
-        voiceRecognition = null;
-        // 有些手機不會送 final 結果：這時把最後一句辨識文字當成指令
-        if (!r._gotFinal && r._last && (voiceMode === 'active' || voiceMode === 'free')) {
-            const c = r._last.replace(WAKE_RE, '').replace(/[。？，！,.?!]/g, '').trim();
-            if (c) { handleVoiceCommand(c); backToStandby(); }
+        clearTimeout(r._idle);
+        setMicActive(false);
+        if (voiceRecognition === r) voiceRecognition = null;
+        // 有些手機不送 final 就結束：把最後一句當成指令
+        if (!r._done && r._last) {
+            r._done = true;
+            commitSpeech(r._last);
         }
-        if (voiceMode !== 'off') {
-            clearTimeout(voiceRestartTimer);
-            voiceRestartTimer = setTimeout(startVoiceCycle, voiceLastError ? 800 : 60);
-        }
+        if (voiceMode === 'off') return;
+        // 正常情況 0 毫秒重開；連續出錯才逐步拉長間隔，避免狂響提示音
+        const delay = voiceErrCount > 0 ? Math.min(250 * Math.pow(2, voiceErrCount - 1), 4000) : 0;
+        scheduleRestart(delay);
     };
     return r;
 }
 
+function scheduleRestart(delay) {
+    clearTimeout(voiceRestartTimer);
+    voiceRestartTimer = setTimeout(startVoiceCycle, delay);
+}
+
 function startVoiceCycle() {
-    if (voiceMode === 'off') return;
-    if (voiceRecognition) return;           // 已經在聽，避免重複啟動
-    voiceRecognition = createRecognition();
-    if (!voiceRecognition) return;
+    voiceRestartTimer = null;
+    if (voiceMode === 'off' || voiceRecognition) return;
+    const r = createRecognition();
+    if (!r) return;
+    voiceRecognition = r;
     try {
-        voiceRecognition.start();
+        r.start();
     } catch (e) {
         voiceRecognition = null;
-        clearTimeout(voiceRestartTimer);
-        voiceRestartTimer = setTimeout(startVoiceCycle, 600);
+        scheduleRestart(250);
     }
 }
 
-function startVoice(fromUser, mode) {
+// 看門狗：每秒檢查一次，任何卡住的情況都會自動恢復
+setInterval(() => {
+    if (voiceMode === 'off') return;
+    const r = voiceRecognition;
+    const now = Date.now();
+    if (!r) {
+        if (!voiceRestartTimer) scheduleRestart(0);
+        return;
+    }
+    // 已經送出但 onend 一直沒來
+    if (r._done && now - (r._doneAt || now) > 1500) {
+        voiceRecognition = null;
+        try { r.abort(); } catch (e) {}
+        scheduleRestart(0);
+        return;
+    }
+    // start() 之後一直沒開始聽
+    if (!r._startedAt && now - r._createdAt > 6000) {
+        r._done = true;
+        voiceRecognition = null;
+        try { r.abort(); } catch (e) {}
+        scheduleRestart(0);
+        return;
+    }
+    // 同一輪聽太久都沒有任何結果：換新的，保持新鮮
+    if (!r._done && !r._last && r._startedAt && now - r._startedAt > 30000) {
+        try { r.abort(); } catch (e) {}
+    }
+}, 1000);
+
+function kickVoice() {
+    if (voiceMode !== 'off' && !voiceRecognition) scheduleRestart(0);
+}
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && voiceMode !== 'off') {
+        holdScreen(true);
+        kickVoice();
+    }
+});
+window.addEventListener('online', kickVoice);
+window.addEventListener('focus', kickVoice);
+
+// ---------- 開 / 關 ----------
+function startVoice(fromUser) {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { if (fromUser) alert("此瀏覽器不支援語音辨識"); return; }
-    mode = mode || 'standby';
+    if (!SR) { if (fromUser) alert("此瀏覽器不支援語音辨識（建議使用 Chrome）"); return; }
     voiceUserInitiated = !!fromUser;
-    voiceMode = mode;
-    voiceLastError = false;
-    localStorage.setItem('p_voice_enabled', mode === 'free' ? '2' : '1');
+    voiceMode = voiceWakePref ? 'standby' : 'free';
+    voiceErrCount = 0;
+    localStorage.setItem('p_voice_on', '1');
     document.getElementById('searchInput')?.blur();
-    setVoiceBtn(mode);
+    setVoiceBtn(voiceMode);
     holdScreen(true);
+    clearTimeout(voiceRestartTimer);
+    voiceRestartTimer = null;
     startVoiceCycle();
 }
 
-function stopVoice() {
+function stopVoice(keepPref) {
     voiceMode = 'off';
     clearTimeout(voiceRestartTimer);
+    voiceRestartTimer = null;
     clearTimeout(activeTimer);
-    if (voiceRecognition) { try { voiceRecognition.abort(); } catch (e) {} }
+    const r = voiceRecognition;
     voiceRecognition = null;
+    if (r) { r._done = true; try { r.abort(); } catch (e) {} }
     setVoiceBtn('off');
+    setMicActive(false);
     holdScreen(false);
+    if (!keepPref) localStorage.setItem('p_voice_on', '0');
 }
 
-// 按鈕循環：🎙️ 關閉 → 👂 喚醒詞模式 → 🗣️ 免喚醒模式 → 關閉
-window.toggleContinuousVoice = function() {
-    if (voiceMode === 'off') {
-        startVoice(true, 'standby');
-        showVoiceHint('👂 喚醒詞模式：說「嗨小P」');
-    } else if (voiceMode === 'standby' || voiceMode === 'active') {
+function setWakeMode(on) {
+    voiceWakePref = !!on;
+    localStorage.setItem('p_voice_wake', on ? '1' : '0');
+    if (voiceMode !== 'off') {
         clearTimeout(activeTimer);
-        voiceMode = 'free';
-        localStorage.setItem('p_voice_enabled', '2');
-        setVoiceBtn('free');
-        showVoiceHint('🗣️ 免喚醒模式：直接說地點');
+        voiceMode = on ? 'standby' : 'free';
+        setVoiceBtn(voiceMode);
+    }
+    showVoiceHint(on ? '👂 喚醒詞模式：先說「嗨小P」再說指令' : '🗣️ 免喚醒模式：直接說地點');
+}
+
+// 點一下：開 / 關
+window.toggleContinuousVoice = function() {
+    if (voiceLongPressed) { voiceLongPressed = false; return; }     // 長按結束後的那一下 click 不處理
+    if (voiceMode === 'off') {
+        startVoice(true);
+        showVoiceHint(voiceWakePref ? '👂 待機中：說「嗨小P」' : '🗣️ 語音已開啟：直接說地點');
     } else {
-        localStorage.setItem('p_voice_enabled', '0');
         stopVoice();
         showVoiceHint('🎙️ 語音已關閉');
     }
 };
 
-// 重開頁面時自動恢復上次的語音模式
+// 長按：切換 免喚醒 / 喚醒詞
+function initVoiceButton() {
+    const btn = document.getElementById('voiceBtn');
+    if (!btn) return;
+    let t = null;
+    const clear = () => { clearTimeout(t); t = null; };
+    btn.addEventListener('pointerdown', () => {
+        voiceLongPressed = false;
+        clear();
+        t = setTimeout(() => {
+            t = null;
+            voiceLongPressed = true;
+            setWakeMode(!voiceWakePref);
+            if (voiceMode === 'off') startVoice(true);
+            if (navigator.vibrate) navigator.vibrate(40);
+        }, 600);
+    });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => btn.addEventListener(ev, clear));
+    btn.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+initVoiceButton();
+
+// 重開頁面時自動恢復
 function autoStartVoice() {
-    const saved = localStorage.getItem('p_voice_enabled');
-    if (saved !== '1' && saved !== '2') return;
-    const mode = saved === '2' ? 'free' : 'standby';
-    startVoice(false, mode);
-    // 若瀏覽器因為沒有手勢而擋掉，第一次碰畫面時再啟動
-    document.addEventListener('pointerdown', () => {
-        const s = localStorage.getItem('p_voice_enabled');
-        if (voiceMode === 'off' && (s === '1' || s === '2')) startVoice(false, s === '2' ? 'free' : 'standby');
+    localStorage.removeItem('p_voice_enabled');     // 舊版設定，已不使用
+    if (localStorage.getItem('p_voice_on') !== '1') return;
+    startVoice(false);
+    // 若瀏覽器因為沒有使用者手勢而擋掉，第一次碰畫面時再啟動
+    document.addEventListener('pointerdown', (e) => {
+        if (e.target && e.target.closest && e.target.closest('#voiceBtn')) return;
+        if (voiceMode === 'off' && localStorage.getItem('p_voice_on') === '1') startVoice(true);
     }, { once: true });
 }
 
+// ---------- 語音指令 ----------
+function navigateToTop() {
+    const item = lastListData.find(p => { const s = availState(veh(p).a); return s === 'ok' || s === 'low'; }) || lastListData[0];
+    if (!item) { showVoiceHint('⚠️ 目前清單沒有停車場可以導航'); return; }
+    if (!userLocation) { showVoiceHint('⚠️ 還沒有 GPS 定位'); return; }
+    showVoiceHint('🧭 導航到：' + item.name);
+    startNav(navArgOf(item));
+}
+
 function handleVoiceCommand(cmd) {
-    // 指令只在「整句很短」時才觸發，避免「台北車站附近」被誤判成切換分頁
-    const short = cmd.length <= 8;
-    if (short) {
-        if (/關閉語音|停止語音/.test(cmd)) { localStorage.setItem('p_voice_enabled', '0'); stopVoice(); return; }
-        if (/重新定位|清除搜尋|^定位$/.test(cmd)) { clearSearchAndLocate(); return; }
-        if (/^(我的)?收藏$/.test(cmd)) { switchTab('fav'); return; }
-        if (/^(附近)?推薦$|^附近$/.test(cmd)) { switchTab('search'); return; }
+    // 控制類指令只在整句很短時才觸發，避免「台北車站附近」被當成控制指令
+    if (cmd.length <= 10) {
+        if (/關閉語音|停止語音|語音關閉/.test(cmd)) { stopVoice(); showVoiceHint('🎙️ 語音已關閉'); return; }
+        if (/結束導航|停止導航|關閉導航|取消導航/.test(cmd)) { stopNavigation(); return; }
+        if (/^(開始)?導航$|^帶我去$|^出發$/.test(cmd)) { navigateToTop(); return; }
+        if (/重新定位|清除搜尋|回到(我的)?位置|^定位$|^(附近|我的位置|目前位置|這裡|這邊)的?(停車場|停車位|車位)?$/.test(cmd)) {
+            clearSearchAndLocate(); showVoiceHint('📍 回到目前位置'); return;
+        }
+        if (/^(我的)?收藏(清單)?$/.test(cmd)) { switchTab('fav'); return; }
+        if (/^(附近)?推薦$/.test(cmd)) { switchTab('search'); return; }
         if (/^(切換)?(找)?機車(位)?$/.test(cmd)) { setVehicle('moto'); showVoiceHint('🛵 已切換：機車'); return; }
         if (/^(切換)?(找)?汽車(位)?$/.test(cmd)) { setVehicle('car'); showVoiceHint('🚗 已切換：汽車'); return; }
-        if (/結束導航|停止導航|關閉導航/.test(cmd)) { stopNavigation(); return; }
+        if (/^(價格)?(最)?便宜(的)?$/.test(cmd)) {
+            const s = document.getElementById('sortSelect');
+            if (s) { s.value = 'price'; changeSortMode(); }
+            showVoiceHint('💰 排序：價格最便宜'); return;
+        }
+        if (/^(距離)?最近$/.test(cmd)) {
+            const s = document.getElementById('sortSelect');
+            if (s) { s.value = 'distance'; changeSortMode(); }
+            showVoiceHint('📏 排序：距離最近'); return;
+        }
     }
 
-    const searchKeyword = cmd.replace(/^(搜尋|尋找|我要找|幫我找)/, "").trim();
-    if (searchKeyword) {
-        showVoiceHint('🔍 搜尋：' + searchKeyword);
+    const keyword = extractKeyword(cmd);
+    if (keyword) {
+        showVoiceHint('🔍 搜尋：' + keyword);
         const inputEl = document.getElementById('searchInput');
-        if (inputEl) { inputEl.value = searchKeyword; searchLocation(); }
+        if (inputEl) { inputEl.value = keyword; searchLocation(); }
     }
 }
 
