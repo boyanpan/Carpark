@@ -1054,6 +1054,7 @@ function showVoiceHint(text) {
     const sheetH = (isSheetMode() && !isNavigating && bottomSheet) ? Math.round(bottomSheet.getBoundingClientRect().height) + 12 : 24;
     el.style.bottom = `calc(${sheetH}px + env(safe-area-inset-bottom))`;
     el.textContent = text;
+    voiceBarSay(text);
     el.style.opacity = '1';
     clearTimeout(hintTimer);
     hintTimer = setTimeout(() => { el.style.opacity = '0'; }, 3000);
@@ -1077,6 +1078,7 @@ function setVoiceBtn(mode) {
         btn.className = base + "bg-white border border-slate-200 active:bg-slate-50";
     }
     btn.title = '點一下開關語音；長按切換「免喚醒 / 喚醒詞」模式';
+    updateVoiceBar(mode);
     const input = document.getElementById('searchInput');
     if (input) {
         input.placeholder =
@@ -1091,6 +1093,57 @@ function setVoiceBtn(mode) {
 function setMicActive(on) {
     const btn = document.getElementById('voiceBtn');
     if (btn) btn.style.boxShadow = on ? '0 0 0 4px rgba(34,197,94,.45)' : '';
+}
+
+// ---------- 搜尋區的語音狀態列（常駐顯示：聆聽中 / 辨識到的文字 / 執行結果）----------
+let voiceBarTimer = null;
+
+function ensureVoiceBar() {
+    let el = document.getElementById('voice-bar');
+    if (el) return el;
+    const row = document.querySelector('#search-panel .search-row');
+    if (!row) return null;
+    el = document.createElement('div');
+    el.id = 'voice-bar';
+    el.style.cssText = 'display:none;align-items:center;gap:8px;margin-top:8px;padding:6px 6px 6px 12px;border-radius:12px;' +
+        'background:#e8efff;border:1px solid #c7d6fb;color:#1e40af;font-size:13px;font-weight:700;';
+    el.innerHTML =
+        '<span class="animate-pulse" style="width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0"></span>' +
+        '<span id="voice-bar-text" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>' +
+        '<button id="voice-bar-stop" type="button" style="flex-shrink:0;padding:5px 12px;border-radius:9px;background:#fff;' +
+        'border:1px solid #c7d6fb;color:#b91c1c;font-size:12px;font-weight:800">關閉</button>';
+    row.insertAdjacentElement('afterend', el);
+    el.querySelector('#voice-bar-stop').addEventListener('click', () => {
+        stopVoice();
+        showVoiceHint('🎙️ 語音已關閉');
+    });
+    return el;
+}
+
+function voiceIdleText(mode) {
+    return mode === 'standby' ? '👂 持續待機中…說「嗨小P」再說指令'
+         : mode === 'active'  ? '🎤 請說指令…'
+         :                      '🗣️ 持續聆聽中…直接說要搜尋的地點';
+}
+
+function updateVoiceBar(mode) {
+    const el = ensureVoiceBar();
+    if (!el) return;
+    clearTimeout(voiceBarTimer);
+    if (mode === 'off') { el.style.display = 'none'; return; }
+    el.style.display = 'flex';
+    el.querySelector('#voice-bar-text').textContent = voiceIdleText(mode);
+}
+
+// 顯示辨識到的文字 / 執行結果，幾秒後自動回到「持續聆聽中」
+function voiceBarSay(text) {
+    if (voiceMode === 'off') return;
+    const el = ensureVoiceBar();
+    if (!el) return;
+    el.style.display = 'flex';
+    el.querySelector('#voice-bar-text').textContent = text;
+    clearTimeout(voiceBarTimer);
+    voiceBarTimer = setTimeout(() => updateVoiceBar(voiceMode), 3500);
 }
 
 async function holdScreen(on) {
@@ -1223,8 +1276,8 @@ function createRecognition() {
             return;
         }
         if (code === 'audio-capture') {
-            stopVoice();
-            showVoiceHint('⚠️ 找不到可用的麥克風');
+            voiceErrCount++;                      // 不自動關閉，持續重試直到使用者關閉
+            showVoiceHint('⚠️ 麥克風暫時無法使用，重試中…');
             return;
         }
         voiceErrCount++;
@@ -1242,7 +1295,7 @@ function createRecognition() {
         }
         if (voiceMode === 'off') return;
         // 正常情況 0 毫秒重開；連續出錯才逐步拉長間隔，避免狂響提示音
-        const delay = voiceErrCount > 0 ? Math.min(250 * Math.pow(2, voiceErrCount - 1), 4000) : 0;
+        const delay = voiceErrCount > 0 ? Math.min(250 * Math.pow(2, voiceErrCount - 1), 3000) : 0;
         scheduleRestart(delay);
     };
     return r;
