@@ -1159,6 +1159,12 @@ def init_db():
 
 init_db()
 
+sync_data_to_db()   # 啟動時先抓一次
+
+scheduler = BackgroundScheduler()
+scheduler.add_job(sync_data_to_db, 'interval', minutes=1)
+scheduler.start()
+
 if __name__ == "__main__":
     try:
         app.run(host='0.0.0.0', port=5000, debug=False)
