@@ -59,7 +59,7 @@ def predict_full(total_spaces: int, current_cars: int, eta_minutes: int) -> bool
 DB_CONFIG = {
     'user': 'avnadmin',
     'password': os.environ.get('DB_PASSWORD'),
-    'host': 'mysql-14bf0d58-iljsauw-7901.c.aivencloud.com',
+    'host': 'mysql-12d67e59-iljsauw-7901.e.aivencloud.com',
     'port': 11576,
     'database': 'defaultdb',
     'ssl_ca': 'ca.pem',
