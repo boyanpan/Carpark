@@ -87,34 +87,6 @@ def db_rows(sql, params=()):
     finally:
         conn.close()
 
-
-def init_db():
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS parking_lots (
-                id VARCHAR(50) PRIMARY KEY,
-                name VARCHAR(255),
-                category VARCHAR(100),
-                address TEXT,
-                lat DECIMAL(10, 8),
-                lng DECIMAL(11, 8),
-                available_car INT,
-                total_car INT,
-                payex TEXT,
-                structure_type VARCHAR(50),
-                last_update TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-            )
-        """)
-        conn.commit()
-        cursor.close()
-        conn.close()
-        print("[INFO] Aiven 資料表已準備就緒")
-    except Exception as e:
-        print(f"[ERROR] 資料庫初始化失敗: {e}")
-
-
 def safe_num(v):
     return None if pd.isna(v) else int(v)
 
@@ -929,7 +901,9 @@ def nearby():
         } for r in rows]
         return jsonify({"message": "success", "nearby": formatted})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
 
 
 @app.route("/api/search_places", methods=["GET"])
@@ -1182,6 +1156,8 @@ def init_db():
         print("[INFO] Aiven 資料表已準備就緒")
     except Exception as e:
         print(f"[ERROR] 資料庫初始化失敗: {e}")
+
+init_db()
 
 if __name__ == "__main__":
     try:
