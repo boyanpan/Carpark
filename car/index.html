@@ -7,7 +7,7 @@
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@600;700;800&family=Noto+Sans+TC:wght@400;500;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;800&display=swap" rel="stylesheet">
 
     <script src="https://cdn.tailwindcss.com"></script>
 
@@ -52,9 +52,9 @@
                 <div class="panel-head">
                     <h1 class="brand"><span class="brand-mark">P</span>P-Finder</h1>
                     <div class="head-right">
-                        <button id="themeBtn" onclick="toggleTheme()" class="theme-btn" title="切換白天 / 夜晚模式" aria-label="切換白天或夜晚模式">🌙</button>
+                        <button type="button" id="themeBtn" onclick="toggleTheme()" class="theme-btn" title="切換白天 / 夜晚模式" aria-label="切換白天或夜晚模式">🌙</button>
                         <div id="parking-helper-zone">
-                            <button id="parkedBtn" onclick="toggleParkedStatus()" class="chip-btn">🚗 記錄停車</button>
+                            <button type="button" id="parkedBtn" onclick="toggleParkedStatus()" class="chip-btn">🚗 記錄停車</button>
                         </div>
                         <div id="gps-status" class="gps-pill">
                             GPS <div id="gps-dot" class="w-2 h-2 bg-red-500 rounded-full"></div>
@@ -67,9 +67,9 @@
                     <div class="search-box">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
                         <input type="text" id="searchInput" autocomplete="off" onkeydown="if(event.key === 'Enter') searchLocation()" placeholder="搜尋停車場、地點或醫院">
-                        <div id="autocomplete-list" class="ac-dropdown absolute left-0 right-0 top-full mt-1 rounded-xl shadow-2xl hidden max-h-[40vh] overflow-y-auto z-[7000]"></div>
+                        <div id="autocomplete-list" class="absolute left-0 right-0 top-full mt-1 rounded-xl shadow-2xl hidden max-h-[40vh] overflow-y-auto z-[7000]"></div>
                     </div>
-                    <button onclick="searchLocation()" class="btn-search shrink-0">搜尋</button>
+                    <button type="button" onclick="searchLocation()" class="btn-search shrink-0">搜尋</button>
                 </div>
 
                 <!-- 第 3 列：範圍 / 排序 / 語音 / 回到位置 -->
@@ -85,20 +85,20 @@
                         <option value="distance" selected>距離最近</option>
                         <option value="price">價格最便宜</option>
                     </select>
-                    <button id="voiceBtn" onclick="toggleContinuousVoice()" class="tool-icon-btn w-10 rounded-lg text-lg flex items-center justify-center shrink-0 transition" title="開啟免持語音控制" aria-label="語音控制">🎙️</button>
-                    <button id="locateBtn" onclick="clearSearchAndLocate()" class="tool-icon-btn w-10 rounded-lg text-lg flex items-center justify-center shrink-0 transition" title="清除搜尋並回到目前位置" aria-label="回到目前位置">📍</button>
+                    <button type="button" id="voiceBtn" onclick="toggleContinuousVoice()" class="tool-icon-btn w-10 rounded-lg text-lg flex items-center justify-center shrink-0 transition" title="開啟免持語音控制" aria-label="語音控制">🎙️</button>
+                    <button type="button" id="locateBtn" onclick="clearSearchAndLocate()" class="tool-icon-btn w-10 rounded-lg text-lg flex items-center justify-center shrink-0 transition" title="清除搜尋並回到目前位置" aria-label="回到目前位置">📍</button>
                 </div>
 
                 <div id="parkedTimerPanel" class="timer-panel hidden flex-col">
                     <div class="flex justify-between items-center">
                         <span class="timer-title font-extrabold">⏰ 愛車計時</span>
-                        <button onclick="clearParkedStatus()" class="timer-clear font-bold text-[11px] px-2.5 py-1 rounded-lg">清除紀錄</button>
+                        <button type="button" onclick="clearParkedStatus()" class="timer-clear font-bold text-[11px] px-2.5 py-1 rounded-lg">清除紀錄</button>
                     </div>
                     <div class="timer-grid">
                         <div>停放時間<span id="parkedTimeDisplay" class="num">0 分鐘</span></div>
                         <div>預估費用<span id="parkedCostDisplay" class="num cost">$0 元</span></div>
                     </div>
-                    <button id="navToCarBtn" onclick="navToMyCar()" class="pk-go pk-go-wide" style="margin-top:0">Google 導航回愛車</button>
+                    <button type="button" id="navToCarBtn" onclick="navToMyCar()" class="pk-go pk-go-wide" style="margin-top:0">Google 導航回愛車</button>
                 </div>
             </div>
 
@@ -113,8 +113,8 @@
                 </div>
 
                 <div class="tabs">
-                    <button onclick="switchTab('search')" id="tab-search" class="tab-active">附近推薦</button>
-                    <button onclick="switchTab('fav')" id="tab-fav" class="tab-inactive">我的收藏</button>
+                    <button type="button" onclick="switchTab('search')" id="tab-search" class="tab-active">附近推薦</button>
+                    <button type="button" onclick="switchTab('fav')" id="tab-fav" class="tab-inactive">我的收藏</button>
                 </div>
 
                 <div id="content-list" class="flex-1 overflow-y-auto p-3 space-y-2.5 no-scrollbar pb-12 overscroll-contain">
@@ -128,14 +128,14 @@
     <div id="map" class="absolute top-0 left-0 w-full h-full z-[1000]"></div>
 
     <!-- 回到我的位置 -->
-    <button onclick="panToUserLocation()" id="recenter-btn" title="回到我的位置" aria-label="回到我的位置"
+    <button type="button" onclick="panToUserLocation()" id="recenter-btn" title="回到我的位置" aria-label="回到我的位置"
         class="recenter-fab fixed right-5 bottom-8 z-[3000] w-12 h-12 rounded-full flex items-center justify-center text-xl cursor-pointer">
         🎯
     </button>
 
-    <!-- 停車場詳細資訊彈窗（Bento 儀表板風格） -->
+    <!-- 停車場詳細資訊彈窗（簡潔分段式） -->
     <div id="detail-modal" onclick="closeDetailModal()" class="modal-backdrop hidden fixed inset-0 z-[5000] flex items-end md:items-center justify-center p-0 md:p-4 pointer-events-auto">
-        <div id="detail-modal-card" onclick="event.stopPropagation()" class="modal-card w-full max-w-[440px] max-h-[88vh] rounded-t-3xl md:rounded-3xl shadow-2xl flex flex-col overflow-hidden">
+        <div id="detail-modal-card" onclick="event.stopPropagation()" class="modal-card w-full max-w-[420px] max-h-[86vh] rounded-t-3xl md:rounded-2xl shadow-2xl flex flex-col overflow-hidden">
             <!-- 由 script.js 動態填入內容 -->
         </div>
     </div>
