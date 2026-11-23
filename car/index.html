@@ -11,10 +11,17 @@
 
     <script src="https://cdn.tailwindcss.com"></script>
 
+    <!-- 先定義 callback：Google Maps 載入完就啟動，不必等其他資源 -->
+    <script>
+        window.gmapsReady = false;
+        window.initMap = function () {
+            window.gmapsReady = true;
+            if (window.__startApp) window.__startApp();
+        };
+    </script>
     <!-- Google Maps API（請到 Google Cloud 把這把 Key 限制為你的網域） -->
-    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDCNjrUE7UN9GPqdnVg6ubx13FGQHLHei4&libraries=places,marker,geometry&v=weekly"></script>
-    <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
+    <script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDCNjrUE7UN9GPqdnVg6ubx13FGQHLHei4&libraries=places,marker,geometry&v=weekly&callback=initMap"></script>
+    <script defer src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
     <link rel="stylesheet" href="style.css">
 
     <meta name="mobile-web-app-capable" content="yes">
@@ -138,6 +145,6 @@
         </div>
     </div>
 
-    <script src="script.js"></script>
+    <script defer src="script.js"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 /* ==========================================================
-   P-Finder — 停車指示牌風格
+   P-Finder — 停車指示牌風格（完整版：原始 + patch + patch2 + 路線選擇）
    ========================================================== */
 :root {
     --ink: #1b2a47;
@@ -253,12 +253,10 @@ body.is-searching #search-panel {
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
-/* ==========================================================
-   style_patch.css — 整段貼在 style.css 「最最後面」
-   （後面的規則會蓋過前面同名的，不用刪原本的）
-   ========================================================== */
 
-/* ---------- 搜尋面板：搜尋框獨佔一整列 ---------- */
+/* ==========================================================
+   style_patch：搜尋框獨佔一列、卡片按鈕移到下方、彈窗自訂關閉鈕
+   ========================================================== */
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
 .head-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .chip-btn {
@@ -274,7 +272,6 @@ body.is-searching #search-panel {
 .filter-row select { height: 42px; }
 #voiceBtn, #locateBtn { width: 44px !important; height: 42px; flex: none; border-radius: 12px !important; }
 
-/* ---------- 停車場卡片：資訊區變寬，按鈕移到下方整列 ---------- */
 #content-list { padding: 12px; }
 .pk-card { grid-template-columns: 60px 1fr; gap: 10px 12px; padding: 12px; }
 .pk-avail strong { font-size: 24px; }
@@ -287,7 +284,6 @@ body.is-searching #search-panel {
 .pk-fav { width: 42px; height: 42px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
 .pk-transit { margin-top: 4px; }
 
-/* ---------- 地圖彈窗：自己的關閉鈕 ---------- */
 .gm-style-iw-chr, .gm-style .gm-ui-hover-effect { display: none !important; }
 .gm-style .gm-style-iw-c { overflow: hidden !important; }
 .pk-pop { position: relative; width: 260px; }
@@ -299,7 +295,6 @@ body.is-searching #search-panel {
 }
 .pk-close:active { background: rgba(255, 255, 255, .45); }
 
-/* ---------- 手機橫向：維持緊湊 ---------- */
 @media (orientation: landscape) and (max-height: 500px) {
     .panel-head { margin-bottom: 6px; }
     .search-box input, .btn-search { height: 38px; }
@@ -310,12 +305,10 @@ body.is-searching #search-panel {
     .pk-actions .pk-go { flex: none; height: auto; }
     .pk-fav { width: 34px; height: 34px; border: 0; }
 }
-/* ==========================================================
-   style_patch2.css — 整段貼在 style.css「最最後面」（在 style_patch 之後）
-   內容：車種切換、卡片左側汽車/機車空位、特殊車位標籤、地圖彈窗不再能捲動
-   ========================================================== */
 
-/* ---------- 車種切換（汽車 / 機車）---------- */
+/* ==========================================================
+   style_patch2：車種切換、汽車/機車空位、特殊車位標籤、彈窗不可捲動
+   ========================================================== */
 .veh-toggle {
     display: flex; gap: 4px; margin-top: 10px; padding: 3px;
     border-radius: 12px; background: var(--mist); border: 1px solid var(--line);
@@ -328,7 +321,6 @@ body.is-searching #search-panel {
     background: #fff; color: var(--sign-dark); box-shadow: 0 1px 4px rgba(15, 23, 42, .18);
 }
 
-/* ---------- 卡片左側：汽車 / 機車各自的空位 ---------- */
 .pk-card { grid-template-columns: 68px 1fr; }
 .pk-avail {
     background: var(--mist); color: var(--text); gap: 5px; padding: 6px 5px; justify-content: center;
@@ -343,7 +335,6 @@ body.is-searching #search-panel {
 .pk-vrow.sel strong { font-size: 21px; }
 .pk-cap { font-size: 10px; opacity: .6; }
 
-/* ---------- 特殊車位標籤（身障 / 婦幼 / 電動車）---------- */
 .pk-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .pk-chip {
     padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap;
@@ -353,9 +344,6 @@ body.is-searching #search-panel {
 .pk-chip.c-pregnancy { background: #fde8f1; color: #be185d; }
 .pk-chip.c-ev        { background: #e6f5ec; color: #15803d; }
 
-/* ---------- 地圖彈窗：內容剛好、不能捲動 ----------
-   原本「開始導航」按鈕 width:100% 又加左右 margin，比框還寬才會出現橫向捲動；
-   這裡改成外框不留邊、內層 .pk-pop-body 用 padding。 */
 .gm-style .gm-style-iw-c { padding: 0 !important; max-height: none !important; overflow: hidden !important; }
 .gm-style .gm-style-iw-d { overflow: hidden !important; max-height: none !important; }
 .pk-pop { width: 240px; padding: 0; box-sizing: border-box; }
@@ -370,14 +358,15 @@ body.is-searching #search-panel {
 .pk-pop .pk-chips { margin-top: 8px; }
 .pk-pop .pk-go-wide { display: block; width: 100%; box-sizing: border-box; margin: 12px 0 0; padding: 11px; }
 
-/* ---------- 手機橫向 ---------- */
 @media (orientation: landscape) and (max-height: 500px) {
     .veh-toggle { margin-top: 6px; }
     .veh-toggle button { height: 28px; }
     .pk-card { grid-template-columns: 68px 1fr auto; }
 }
 
-/* ---------- 路線選擇面板 ---------- */
+/* ==========================================================
+   路線選擇面板（多路線預覽）
+   ========================================================== */
 #route-picker {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 4500;
     background: var(--paper); border-radius: 22px 22px 0 0;

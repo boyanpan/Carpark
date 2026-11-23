@@ -1,5 +1,5 @@
 // ==========================================
-// 0. 小工具（HTML 跳脫、車位狀態）
+// 0. 小工具（HTML 跳脫、車位狀態、逾時 fetch）
 // ==========================================
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -11,18 +11,25 @@ function availState(a) {
 }
 const STATE_TEXT = { ok: '空位', low: '空位少', full: '已滿', nodata: '無資料' };
 
+// 有逾時的 fetch：手機網路不穩時不會一直卡住
+function fetchT(url, ms = 12000) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), ms);
+    return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(t));
+}
+
 // ==========================================
 // 1. 初始化地圖與全域變數
 // ==========================================
-const API_BASE_URL = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') 
-    ? "http://127.0.0.1:5000" 
+const API_BASE_URL = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? "http://127.0.0.1:5000"
     : window.location.origin;
 
 let map, markerCluster;
-let directionsService, directionsRenderer;
-let infoWindow; 
+let directionsService;
+let infoWindow;
 
-let parkingData = []; 
+let parkingData = [];
 let userLocation = null, previousLocation = null, currentHeading = 0, hasCompass = false;
 let userMarker = null, searchedLocation = null, destMarker = null, radiusCircle = null;
 let isNavigating = false, currentDestination = null, currentTab = 'search';
@@ -32,13 +39,25 @@ let currentVehicle = localStorage.getItem('p_vehicle') === 'moto' ? 'moto' : 'ca
 let searchSeq = 0;          // 搜尋流水號：連續快速搜尋時，只採用最新一次的結果
 let parkingFetchSeq = 0;    // 車位資料流水號：丟棄過期的回應
 let lastListData = [];      // 目前清單上的停車場（語音「導航」用）
-window.markersMap = {}; 
+window.markersMap = {};
+
+// 多路線預覽（必須在 applyLayout() 第一次執行前宣告）
+let routePolys = [];
+let routeState = null;          // { item, routes }
+let selectedRoute = 0;
+let routePreviewing = false;
+let popupOpen = false;
+function uiLocked() { return isNavigating || routePreviewing; }
+
+// 手機效能：最多畫幾個圖釘 / 卡片
+const MAX_MARKERS = 150;
+const MAX_CARDS = 80;
 
 const bottomSheet = document.getElementById('bottom-sheet');
 const searchPanel = document.getElementById('search-panel');
 const dragHandle = document.getElementById('drag-handle');
 const sheetArrow = document.getElementById('sheet-arrow');
-let startY = 0, currentHeight = 0, isSheetExpanded = false; 
+let startY = 0, currentHeight = 0, isSheetExpanded = false;
 
 function isLandscapePhone() {
     return window.matchMedia('(orientation: landscape) and (max-height: 500px)').matches;
@@ -120,7 +139,7 @@ function applyLayout() {
         if (searchPanel) searchPanel.style.transform = '';
         if (isLandscapePhone() && uiLocked() && sb) sb.style.transform = 'translateX(-100%)';
     }
-    if (typeof google !== 'undefined' && map) google.maps.event.trigger(map, 'resize');
+    if (typeof google !== 'undefined' && google.maps && map) google.maps.event.trigger(map, 'resize');
 }
 window.addEventListener('resize', applyLayout);
 window.addEventListener('orientationchange', () => setTimeout(applyLayout, 300));
@@ -133,19 +152,34 @@ if (bottomSheet && window.ResizeObserver) {
     }).observe(bottomSheet);
 }
 
-window.onload = function() {
+// Google Maps 載入完成（由 index.html 的 callback 觸發）就啟動，不再等 window.onload
+let appBooted = false;
+function bootApp() {
+    if (appBooted) return;
+    appBooted = true;
     if (typeof google === 'undefined' || !google.maps) {
         const listEl = document.getElementById('content-list');
         if (listEl) listEl.innerHTML = `<div class="pk-empty">Google 地圖載入失敗<br><small>請檢查 API Key 與網路連線</small></div>`;
         return;
     }
     initGoogleMap();
-};
+}
+if (window.gmapsReady) bootApp();
+else window.__startApp = bootApp;
+
+// 15 秒還沒載入就提示
+setTimeout(() => {
+    if (!window.gmapsReady) {
+        const el = document.getElementById('content-list');
+        if (el) el.innerHTML = `<div class="pk-empty">Google 地圖載入逾時<br><small>請檢查網路，或確認 API Key 的網域限制</small></div>`;
+    }
+}, 15000);
 
 async function initGoogleMap() {
     const { Map } = await google.maps.importLibrary('maps');
     await google.maps.importLibrary('marker');
     await google.maps.importLibrary('places');
+    await google.maps.importLibrary('routes');
 
     map = new Map(document.getElementById('map'), {
         center: { lat: 25.0478, lng: 121.5170 },
@@ -162,20 +196,15 @@ async function initGoogleMap() {
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePopup(); });
 
     directionsService = new google.maps.DirectionsService();
-    directionsRenderer = new google.maps.DirectionsRenderer({
-        map: map,
-        suppressMarkers: true,
-        polylineOptions: { strokeColor: '#2563eb', strokeWeight: 7, strokeOpacity: 0.9 }
-    });
 
-    // initGoogleMap() 裡的 dragstart / dragend
     map.addListener('dragstart', () => { if (isSheetMode() && !uiLocked()) setUIHidden(true); });
     map.addListener('dragend', () => {
-    if (isSheetMode() && !uiLocked()) {
-        setUIHidden(false);
-        if (popupOpen && searchPanel) searchPanel.style.transform = 'translateY(-100%)';
-    }
-});
+        if (isSheetMode() && !uiLocked()) {
+            setUIHidden(false);
+            // 彈窗開著時，搜尋面板維持收起
+            if (popupOpen && searchPanel) searchPanel.style.transform = 'translateY(-100%)';
+        }
+    });
 
     if (typeof DeviceOrientationEvent !== 'undefined' &&
         typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -203,10 +232,10 @@ window.toggleBottomSheet = function() {
     isSheetExpanded = !isSheetExpanded;
     if (isSheetExpanded) {
         bottomSheet.style.height = '85vh';
-        if (sheetArrow) sheetArrow.style.transform = 'rotate(180deg)'; 
+        if (sheetArrow) sheetArrow.style.transform = 'rotate(180deg)';
     } else {
         bottomSheet.style.height = '35vh';
-        if (sheetArrow) sheetArrow.style.transform = 'rotate(0deg)';   
+        if (sheetArrow) sheetArrow.style.transform = 'rotate(0deg)';
     }
 };
 
@@ -215,7 +244,7 @@ function collapseBottomSheet() {
         bottomSheet.style.transition = 'height 0.4s cubic-bezier(0.25, 1, 0.5, 1)';
         bottomSheet.style.height = '35vh';
         isSheetExpanded = false;
-        if(sheetArrow) sheetArrow.style.transform = 'rotate(0deg)';
+        if (sheetArrow) sheetArrow.style.transform = 'rotate(0deg)';
     }
 }
 
@@ -228,15 +257,15 @@ if (dragHandle && bottomSheet) {
     }, {passive: true});
 
     dragHandle.addEventListener('touchmove', (e) => {
-        if (isDraggingSheet) return; 
+        if (isDraggingSheet) return;
         isDraggingSheet = true;
         requestAnimationFrame(() => {
             let newHeight = currentHeight + (startY - e.touches[0].clientY);
             const winH = window.innerHeight;
-            if (newHeight > winH * 0.85) newHeight = winH * 0.85; 
-            if (newHeight < winH * 0.20) newHeight = winH * 0.20; 
+            if (newHeight > winH * 0.85) newHeight = winH * 0.85;
+            if (newHeight < winH * 0.20) newHeight = winH * 0.20;
             bottomSheet.style.height = `${newHeight}px`;
-            isDraggingSheet = false; 
+            isDraggingSheet = false;
         });
     }, {passive: true});
 
@@ -273,7 +302,7 @@ function handleOrientation(event) {
     if (heading !== null) {
         hasCompass = true;
         currentHeading = heading;
-        updateCarIcon(); 
+        updateCarIcon();
     }
 }
 
@@ -316,10 +345,10 @@ function initGPS() {
             const { latitude, longitude, heading } = pos.coords;
             const isFirst = !userLocation;
             userLocation = [latitude, longitude];
-            
+
             if (!hasCompass) {
                 if (heading !== null && !isNaN(heading)) {
-                    currentHeading = heading; 
+                    currentHeading = heading;
                 } else if (previousLocation) {
                     currentHeading = getBearing(previousLocation[0], previousLocation[1], latitude, longitude);
                 }
@@ -332,14 +361,14 @@ function initGPS() {
                 el.className = 'me-marker';
                 el.innerHTML = '<svg viewBox="0 0 40 40" width="40" height="40"><circle cx="20" cy="20" r="16" fill="rgba(37,99,235,.18)"/><path d="M20 6 L28 28 L20 23 L12 28 Z" fill="#2563eb" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>';
                 userMarker = new google.maps.marker.AdvancedMarkerElement({ map, position, content: el, zIndex: 999 });
-            } else { 
+            } else {
                 userMarker.position = position;
             }
             updateCarIcon();
             setDot('bg-green-500 shadow-[0_0_8px_#22c55e]');
 
-            if (isFirst && !searchedLocation && !window.currentKeyword) { 
-                handleFilter(); 
+            if (isFirst && !searchedLocation && !window.currentKeyword) {
+                handleFilter();
                 map.panTo(position);
                 map.setZoom(15);
             }
@@ -389,15 +418,15 @@ async function fetchTaipeiParkingData() {
         if (listEl && parkingData.length === 0) {
             listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">📡 正在從雲端讀取即時車位...</div>`;
         }
-        
+
         let fetchUrl = `${API_BASE_URL}/nearby`;
         if (searchedLocation && searchedLocation.length === 2) {
             fetchUrl += `?dest_lat=${searchedLocation[0]}&dest_lng=${searchedLocation[1]}`;
         }
 
-        const res = await fetch(fetchUrl);
+        const res = await fetchT(fetchUrl, 20000);
         if (!res.ok) throw new Error("伺服器回應錯誤");
-        
+
         const result = await res.json();
         if (seq !== parkingFetchSeq) return;
 
@@ -408,7 +437,7 @@ async function fetchTaipeiParkingData() {
         parkingData = (result.nearby || []).map((p, index) => {
             let mockTransit = null;
             let distToDest = 999;
-            
+
             if (searchedLocation) {
                 distToDest = calculateDistance(searchedLocation[0], searchedLocation[1], p.lat, p.lng);
             } else if (userLocation) {
@@ -454,20 +483,21 @@ async function fetchTaipeiParkingData() {
                     pregnancy: { t: total(p.totalpregnancy), a: left(p.availablepregnancy) },
                     ev:        { t: total(p.totalev),        a: left(p.availableev) }
                 },
-                transit: p.transit || mockTransit 
+                transit: p.transit || mockTransit
             };
         });
         handleFilter();
     } catch (err) {
         if (seq !== parkingFetchSeq) return;
         const listEl = document.getElementById('content-list');
-        if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">無法連接雲端伺服器</div>`;
+        if (listEl) listEl.innerHTML = `<div class="pk-empty">無法連接伺服器<br><small>${esc(err.name === 'AbortError' ? '連線逾時' : err.message)}</small>
+            <br><button class="pk-go" style="margin-top:10px" onclick="fetchTaipeiParkingData()">重試</button></div>`;
     }
 }
 
 async function fetchGooglePlacesFromBackend(queryStr) {
     try {
-        const res = await fetch(`${API_BASE_URL}/api/search_places?q=${encodeURIComponent(queryStr)}`);
+        const res = await fetchT(`${API_BASE_URL}/api/search_places?q=${encodeURIComponent(queryStr)}`, 10000);
         if (!res.ok) throw new Error("後端請求失敗");
         return await res.json();
     } catch (err) {
@@ -520,18 +550,18 @@ async function searchLocation() {
 
     const autocompleteList = document.getElementById('autocomplete-list');
     if (autocompleteList) autocompleteList.classList.add('hidden');
-    
-    let localMatches = parkingData.filter(p => 
+
+    let localMatches = parkingData.filter(p =>
         smartMatch(p.name, rawQuery) || smartMatch(p.destName, rawQuery) || smartMatch(p.address, rawQuery) || smartMatch(p.category, rawQuery)
     );
     const listEl = document.getElementById('content-list');
     if (localMatches.length > 0) {
         if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-blue-500 font-bold">🔍 找到 ${localMatches.length} 筆相關地點...</div>`;
         window.currentKeyword = rawQuery;
-        searchedLocation = null; 
+        searchedLocation = null;
         if (destMarker) destMarker.map = null;
-        handleFilter(); 
-        
+        handleFilter();
+
         const bounds = new google.maps.LatLngBounds();
         localMatches.forEach(p => bounds.extend(new google.maps.LatLng(p.lat, p.lng)));
         map.fitBounds(bounds);
@@ -540,7 +570,7 @@ async function searchLocation() {
 
     window.currentKeyword = null;
     if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">🌍 正在 Google 地圖搜尋「${esc(rawQuery)}」...</div>`;
-    
+
     try {
         const place = await findPlace(rawQuery);
         if (mySeq !== searchSeq) return;        // 這段期間又搜尋了別的，這個結果作廢
@@ -552,7 +582,7 @@ async function searchLocation() {
         } else {
             if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">找不到「${esc(rawQuery)}」</div>`;
         }
-    } catch (err) { 
+    } catch (err) {
         if (mySeq !== searchSeq) return;
         if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500">搜尋失敗，請稍後再試</div>`;
     }
@@ -561,18 +591,18 @@ async function searchLocation() {
 function clearSearchAndLocate() {
     searchSeq++;
     document.body.classList.remove('is-searching');
-    initCompass(); 
+    initCompass();
     const searchInput = document.getElementById('searchInput');
     if (searchInput) searchInput.value = "";
     searchedLocation = null;
-    window.currentKeyword = null; 
-    
+    window.currentKeyword = null;
+
     if (destMarker) destMarker.map = null;
     if (radiusCircle) radiusCircle.setMap(null);
-    
-    fetchTaipeiParkingData(); 
 
-    if (userLocation) {
+    fetchTaipeiParkingData();
+
+    if (userLocation && map) {
         map.panTo({ lat: userLocation[0], lng: userLocation[1] });
         map.setZoom(15);
     }
@@ -595,18 +625,18 @@ function handleFilter() {
 
     // 車種篩選：只留下有這種車位的停車場
     data = data.filter(hasVehSpots);
-    
+
     const radiusSelect = document.getElementById('radiusSelect');
     const radiusMeters = radiusSelect ? parseFloat(radiusSelect.value) : 99999;
     const refLocation = searchedLocation || userLocation;
 
     if (radiusCircle) radiusCircle.setMap(null);
-    
+
     if (window.currentKeyword) {
-        data = data.filter(p => 
-            smartMatch(p.name, window.currentKeyword) || 
-            smartMatch(p.destName, window.currentKeyword) || 
-            smartMatch(p.address, window.currentKeyword) || 
+        data = data.filter(p =>
+            smartMatch(p.name, window.currentKeyword) ||
+            smartMatch(p.destName, window.currentKeyword) ||
+            smartMatch(p.address, window.currentKeyword) ||
             smartMatch(p.category, window.currentKeyword)
         );
     }
@@ -615,15 +645,17 @@ function handleFilter() {
         data = data.map(p => ({ ...p, distance: calculateDistance(refLocation[0], refLocation[1], p.lat, p.lng) }));
         if (!window.currentKeyword && radiusMeters < 99999) {
             data = data.filter(p => p.distance <= (radiusMeters / 1000));
-            radiusCircle = new google.maps.Circle({
-                map: map,
-                center: { lat: refLocation[0], lng: refLocation[1] },
-                radius: radiusMeters,
-                fillColor: '#1b2a47',
-                fillOpacity: 0.05,
-                strokeColor: '#1b2a47',
-                strokeWeight: 1.5
-            });
+            if (map) {
+                radiusCircle = new google.maps.Circle({
+                    map: map,
+                    center: { lat: refLocation[0], lng: refLocation[1] },
+                    radius: radiusMeters,
+                    fillColor: '#1b2a47',
+                    fillOpacity: 0.05,
+                    strokeColor: '#1b2a47',
+                    strokeWeight: 1.5
+                });
+            }
         }
 
         if (currentSortMode === 'distance') {
@@ -640,7 +672,7 @@ function handleFilter() {
                 const priceA = getPriceValue(a.payex);
                 const priceB = getPriceValue(b.payex);
                 if (priceA !== priceB) return priceA - priceB;
-                return a.distance - b.distance; 
+                return a.distance - b.distance;
             });
         }
     } else if (window.currentKeyword) {
@@ -648,8 +680,8 @@ function handleFilter() {
     }
 
     lastListData = data;
-    renderMapMarkers(data);
-    renderList(data, !!searchedLocation); 
+    renderMapMarkers(data.slice(0, MAX_MARKERS));
+    renderList(data.slice(0, MAX_CARDS), !!searchedLocation);
 }
 
 // 點圖釘：清單捲到對應卡片即可（不再展開抽屜，避免蓋住地圖和彈窗）
@@ -661,8 +693,6 @@ window.highlightCardInList = function(id) {
         targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 };
-
-let popupOpen = false;
 
 // 地圖彈窗：只留 剩餘車位 / 名稱 / 地址 / 費率 / 特殊車位 / 導航
 function openMarkerPopup(item, marker) {
@@ -701,8 +731,9 @@ function closePopup() {
 // 7. 圖標與清單渲染
 // ==========================================
 function renderMapMarkers(data) {
+    if (!map) return;
     Object.values(window.markersMap).forEach(m => (m.map = null));
-    window.markersMap = {}; 
+    window.markersMap = {};
 
     const markers = data.map(item => {
         const v = veh(item);
@@ -726,9 +757,16 @@ function renderMapMarkers(data) {
         return marker;
     });
 
-    if (!markerCluster) markerCluster = new markerClusterer.MarkerClusterer({ map, markers: [] });
-    markerCluster.clearMarkers();
-    markerCluster.addMarkers(markers);
+    if (!markerCluster && window.markerClusterer) {
+        markerCluster = new markerClusterer.MarkerClusterer({ map, markers: [] });
+    }
+    if (markerCluster) {
+        markerCluster.clearMarkers();
+        markerCluster.addMarkers(markers);
+    } else {
+        // 叢集套件還沒載入：先直接放到地圖上
+        markers.forEach(m => (m.map = map));
+    }
 }
 
 // 清單卡片：左邊汽車/機車各自的空位，右邊是名稱、距離、費率、特殊車位、轉乘
@@ -790,7 +828,7 @@ function selectCard(id, lat, lng) {
     collapseBottomSheet();
     map.panTo({ lat: lat, lng: lng });
     map.setZoom(17);
-    
+
     document.querySelectorAll('.parking-card').forEach(card => card.classList.remove('top-card'));
     const activeCard = document.getElementById(`card-${id}`);
     if (activeCard) {
@@ -844,11 +882,11 @@ function initAutocomplete() {
 
         searchSeq++;
         searchedLocation = [lat, lng];
-        window.currentKeyword = null; 
+        window.currentKeyword = null;
 
         createSearchMarker(name, lat, lng, address);
         handleFilter();
-        fetchTaipeiParkingData(); 
+        fetchTaipeiParkingData();
         collapseBottomSheet();
     });
 }
@@ -856,12 +894,6 @@ function initAutocomplete() {
 // ==========================================
 // 10. 導航功能（多路線選擇）
 // ==========================================
-let routePolys = [];
-let routeState = null;          // { item, routes }
-let selectedRoute = 0;
-let routePreviewing = false;
-function uiLocked() { return isNavigating || routePreviewing; }
-
 function clearRoutes() {
     routePolys.forEach(p => p.setMap(null));
     routePolys = [];
@@ -932,7 +964,7 @@ function renderRoutePicker() {
 }
 
 window.selectRoute = function(i) {
-    if (!routeState || !routeState.routes[i]) return;
+    if (!routeState || !routeState.routes || !routeState.routes[i]) return;
     selectedRoute = i;
     styleRoutes();
     if (routePreviewing) {
@@ -1007,6 +1039,7 @@ function beginNavigation(idx) {
 window.startNav = function(itemStr) {
     const item = JSON.parse(decodeURIComponent(itemStr));
     if (!userLocation) return alert("等待 GPS 定位中，請確保已開啟定位權限！");
+    if (!directionsService) return alert("地圖尚未載入完成，請稍候再試！");
 
     // 清掉上一次的預覽 / 路線
     clearRoutes();
@@ -1056,7 +1089,7 @@ window.stopNavigation = function() {
     setUIHidden(false);
 
     const ref = searchedLocation || userLocation;
-    if (ref) {
+    if (ref && map) {
         map.panTo({ lat: ref[0], lng: ref[1] });
         map.setZoom(15);
     }
@@ -1092,7 +1125,7 @@ function createSearchMarker(name, lat, lng, address = "") {
     if (destMarker) destMarker.map = null;
     const markerContent = document.createElement('div');
     markerContent.innerHTML = `<div class="target-marker" style="font-size: 32px; filter: drop-shadow(0 4px 4px rgba(0,0,0,0.4));">📍</div>`;
-    
+
     destMarker = new google.maps.marker.AdvancedMarkerElement({
         map: map,
         position: { lat: lat, lng: lng },
@@ -1178,7 +1211,7 @@ function showVoiceHint(text) {
         document.body.appendChild(el);
     }
     // 手機：浮在清單抽屜上方；其他情況貼近底部
-    const sheetH = (isSheetMode() && !isNavigating && bottomSheet) ? Math.round(bottomSheet.getBoundingClientRect().height) + 12 : 24;
+    const sheetH = (isSheetMode() && !uiLocked() && bottomSheet) ? Math.round(bottomSheet.getBoundingClientRect().height) + 12 : 24;
     el.style.bottom = `calc(${sheetH}px + env(safe-area-inset-bottom))`;
     el.textContent = text;
     voiceBarSay(text);
@@ -1586,16 +1619,18 @@ function navigateToTop() {
 }
 
 function handleVoiceCommand(cmd) {
-    // 控制類指令只在整句很短時才觸發，避免「台北車站附近」被當成控制指令
+    // 路線預覽中：可以用語音選路線
     if (routePreviewing) {
-    if (/^(開始|出發|開始導航|確定)$/.test(cmd)) { confirmRoute(); return; }
-    if (/^(取消|算了)$/.test(cmd)) { cancelRoutePreview(); return; }
-    const m = cmd.match(/第?([一二三123])條?/);
-    if (m) {
-        const n = { '一': 0, '二': 1, '三': 2, '1': 0, '2': 1, '3': 2 }[m[1]];
-        if (routeState && routeState.routes[n]) { selectRoute(n); return; }
+        if (/^(開始|出發|開始導航|確定)$/.test(cmd)) { confirmRoute(); return; }
+        if (/^(取消|算了)$/.test(cmd)) { cancelRoutePreview(); return; }
+        const m = cmd.match(/第?([一二三123])條?/);
+        if (m) {
+            const n = { '一': 0, '二': 1, '三': 2, '1': 0, '2': 1, '3': 2 }[m[1]];
+            if (routeState && routeState.routes && routeState.routes[n]) { selectRoute(n); return; }
+        }
     }
-}
+
+    // 控制類指令只在整句很短時才觸發，避免「台北車站附近」被當成控制指令
     if (cmd.length <= 10) {
         if (/關閉語音|停止語音|語音關閉/.test(cmd)) { stopVoice(); showVoiceHint('🎙️ 語音已關閉'); return; }
         if (/結束導航|停止導航|關閉導航|取消導航/.test(cmd)) { stopNavigation(); return; }
@@ -1663,7 +1698,7 @@ function startParkedTimerLoop() {
     if (parkedMarker) parkedMarker.map = null;
     const parkedIconContent = document.createElement('div');
     parkedIconContent.innerHTML = `<div class="parked-marker-container" style="font-size: 32px; filter: drop-shadow(0 4px 4px rgba(0,0,0,0.3));">🚙</div>`;
-    
+
     parkedMarker = new google.maps.marker.AdvancedMarkerElement({
         map: map,
         position: { lat: parseFloat(lat), lng: parseFloat(lng) },
@@ -1671,7 +1706,7 @@ function startParkedTimerLoop() {
     });
 
     const updateDisplay = () => {
-        const diffMins = Math.max(1, Math.floor((Date.now() - parseInt(startTime)) / 1000 / 60)); 
+        const diffMins = Math.max(1, Math.floor((Date.now() - parseInt(startTime)) / 1000 / 60));
         let timeStr = `${diffMins} 分鐘`;
         if (diffMins >= 60) {
             timeStr = `${Math.floor(diffMins / 60)} 小時 ${diffMins % 60} 分`;
@@ -1682,7 +1717,7 @@ function startParkedTimerLoop() {
 
     updateDisplay();
     if (parkedInterval) clearInterval(parkedInterval);
-    parkedInterval = setInterval(updateDisplay, 30000); 
+    parkedInterval = setInterval(updateDisplay, 30000);
 }
 
 window.clearParkedStatus = function() {
@@ -1706,7 +1741,7 @@ window.navToMyCar = function() {
     const lat = localStorage.getItem('p_parked_lat');
     const lng = localStorage.getItem('p_parked_lng');
     if (!lat || !lng) return;
-    startNav(encodeURIComponent(JSON.stringify({ name: "我的愛車 🚗", lat: parseFloat(lat), lng: parseFloat(lng) }))); 
+    startNav(encodeURIComponent(JSON.stringify({ name: "我的愛車 🚗", lat: parseFloat(lat), lng: parseFloat(lng) })));
 };
 
 function checkSavedParkedStatus() {
