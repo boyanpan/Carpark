@@ -11,11 +11,8 @@
 
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- 提前套用儲存的日/夜模式，避免畫面閃爍 -->
+    <!-- 先定義 callback：Google Maps 載入完就啟動，不必等其他資源 -->
     <script>
-        if (localStorage.getItem('p_theme') === 'dark') {
-            document.documentElement.classList.add('theme-dark');
-        }
         window.gmapsReady = false;
         window.initMap = function () {
             window.gmapsReady = true;
@@ -25,7 +22,7 @@
     <!-- Google Maps API（請到 Google Cloud 把這把 Key 限制為你的網域） -->
     <script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDCNjrUE7UN9GPqdnVg6ubx13FGQHLHei4&libraries=places,marker,geometry&v=weekly&callback=initMap"></script>
     <script defer src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=3">
 
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -35,24 +32,23 @@
 
     <!-- 街景模式返回列 -->
     <div id="streetview-bar" class="hidden fixed top-4 left-4 right-4 z-[6000] flex items-center justify-between pointer-events-none">
-        <button onclick="closeStreetView()" class="sv-back-btn pointer-events-auto px-4 py-2.5 rounded-full shadow-xl font-bold text-sm flex items-center gap-2 transition active:scale-95">
+        <button type="button" onclick="closeStreetView()" class="sv-back pointer-events-auto px-4 py-2.5 rounded-full shadow-xl font-bold text-sm flex items-center gap-2 transition active:scale-95">
             <span>←</span>
             <span>返回地圖</span>
         </button>
-        <div id="streetview-title" class="sv-title-pill pointer-events-auto px-3.5 py-2 rounded-full shadow-lg font-bold text-xs max-w-[55vw] truncate"></div>
+        <div id="streetview-title" class="sv-pill pointer-events-auto px-3.5 py-2 rounded-full shadow-lg font-bold text-xs max-w-[55vw] truncate"></div>
     </div>
 
     <div id="ui-container" class="absolute top-0 left-0 w-full h-full pointer-events-none flex flex-col md:flex-row z-[2000] overflow-hidden">
 
-        <div id="sidebar-wrapper" class="sidebar-shell w-full md:w-[400px] h-full flex flex-col shrink-0 relative overflow-hidden">
+        <div id="sidebar-wrapper" class="w-full md:w-[400px] h-full flex flex-col shrink-0 md:bg-white md:shadow-[6px_0_30px_rgba(15,23,42,0.1)] relative overflow-hidden md:border-r md:border-slate-200">
 
             <!-- 搜尋面板 -->
             <div id="search-panel" class="pointer-events-auto rounded-b-3xl md:rounded-none z-50 transition-transform duration-300 ease-in-out shrink-0">
-                <!-- 第 1 列：品牌 + 日夜切換 + 記錄停車 + GPS -->
+                <!-- 第 1 列：品牌 + 記錄停車 + GPS -->
                 <div class="panel-head">
                     <h1 class="brand"><span class="brand-mark">P</span>P-Finder</h1>
                     <div class="head-right">
-                        <button type="button" id="themeBtn" onclick="toggleTheme()" class="theme-btn" title="切換白天 / 夜晚模式" aria-label="切換白天或夜晚模式">🌙</button>
                         <div id="parking-helper-zone">
                             <button type="button" id="parkedBtn" onclick="toggleParkedStatus()" class="chip-btn">🚗 記錄停車</button>
                         </div>
@@ -67,7 +63,7 @@
                     <div class="search-box">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
                         <input type="text" id="searchInput" autocomplete="off" onkeydown="if(event.key === 'Enter') searchLocation()" placeholder="搜尋停車場、地點或醫院">
-                        <div id="autocomplete-list" class="absolute left-0 right-0 top-full mt-1 rounded-xl shadow-2xl hidden max-h-[40vh] overflow-y-auto z-[7000]"></div>
+                        <div id="autocomplete-list" class="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl hidden max-h-[40vh] overflow-y-auto z-[7000]"></div>
                     </div>
                     <button type="button" onclick="searchLocation()" class="btn-search shrink-0">搜尋</button>
                 </div>
@@ -85,14 +81,14 @@
                         <option value="distance" selected>距離最近</option>
                         <option value="price">價格最便宜</option>
                     </select>
-                    <button type="button" id="voiceBtn" onclick="toggleContinuousVoice()" class="tool-icon-btn w-10 rounded-lg text-lg flex items-center justify-center shrink-0 transition" title="開啟免持語音控制" aria-label="語音控制">🎙️</button>
-                    <button type="button" id="locateBtn" onclick="clearSearchAndLocate()" class="tool-icon-btn w-10 rounded-lg text-lg flex items-center justify-center shrink-0 transition" title="清除搜尋並回到目前位置" aria-label="回到目前位置">📍</button>
+                    <button type="button" id="voiceBtn" onclick="toggleContinuousVoice()" class="bg-white border border-slate-200 w-10 rounded-lg shadow-sm active:bg-slate-50 text-lg flex items-center justify-center shrink-0 transition" title="開啟免持語音控制" aria-label="語音控制">🎙️</button>
+                    <button type="button" id="locateBtn" onclick="clearSearchAndLocate()" class="bg-white border border-slate-200 w-10 rounded-lg shadow-sm active:bg-slate-50 text-lg flex items-center justify-center shrink-0" title="清除搜尋並回到目前位置" aria-label="回到目前位置">📍</button>
                 </div>
 
                 <div id="parkedTimerPanel" class="timer-panel hidden flex-col">
                     <div class="flex justify-between items-center">
-                        <span class="timer-title font-extrabold">⏰ 愛車計時</span>
-                        <button type="button" onclick="clearParkedStatus()" class="timer-clear font-bold text-[11px] px-2.5 py-1 rounded-lg">清除紀錄</button>
+                        <span class="font-extrabold text-slate-800">⏰ 愛車計時</span>
+                        <button type="button" onclick="clearParkedStatus()" class="text-red-600 font-bold text-[11px] bg-white px-2.5 py-1 rounded-lg border border-red-200">清除紀錄</button>
                     </div>
                     <div class="timer-grid">
                         <div>停放時間<span id="parkedTimeDisplay" class="num">0 分鐘</span></div>
@@ -113,8 +109,8 @@
                 </div>
 
                 <div class="tabs">
-                    <button type="button" onclick="switchTab('search')" id="tab-search" class="tab-active">附近推薦</button>
-                    <button type="button" onclick="switchTab('fav')" id="tab-fav" class="tab-inactive">我的收藏</button>
+                    <button type="button" onclick="switchTab('search')" id="tab-search" class="text-[#1b2a47] border-b-2 border-[#1b2a47]">附近推薦</button>
+                    <button type="button" onclick="switchTab('fav')" id="tab-fav" class="border-b-2 border-transparent">我的收藏</button>
                 </div>
 
                 <div id="content-list" class="flex-1 overflow-y-auto p-3 space-y-2.5 no-scrollbar pb-12 overscroll-contain">
@@ -129,17 +125,17 @@
 
     <!-- 回到我的位置 -->
     <button type="button" onclick="panToUserLocation()" id="recenter-btn" title="回到我的位置" aria-label="回到我的位置"
-        class="recenter-fab fixed right-5 bottom-8 z-[3000] w-12 h-12 rounded-full flex items-center justify-center text-xl cursor-pointer">
+        class="fixed right-5 bottom-8 z-[3000] bg-white text-slate-700 w-12 h-12 rounded-full border border-slate-200 flex items-center justify-center text-xl cursor-pointer">
         🎯
     </button>
 
-    <!-- 停車場詳細資訊彈窗（簡潔分段式） -->
-    <div id="detail-modal" onclick="closeDetailModal()" class="modal-backdrop hidden fixed inset-0 z-[5000] flex items-end md:items-center justify-center p-0 md:p-4 pointer-events-auto">
-        <div id="detail-modal-card" onclick="event.stopPropagation()" class="modal-card w-full max-w-[420px] max-h-[86vh] rounded-t-3xl md:rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+    <!-- 停車場詳細資訊彈窗（資訊分開區塊） -->
+    <div id="detail-modal" onclick="closeDetailModal()" class="hidden fixed inset-0 z-[5000] bg-slate-900/45 backdrop-blur-[1px] flex items-end md:items-center justify-center p-0 md:p-4 pointer-events-auto">
+        <div id="detail-modal-card" onclick="event.stopPropagation()" class="bg-[#f3f5f9] w-full max-w-[420px] max-h-[86vh] rounded-t-3xl md:rounded-2xl shadow-2xl flex flex-col overflow-hidden text-slate-900">
             <!-- 由 script.js 動態填入內容 -->
         </div>
     </div>
 
-    <script defer src="script.js"></script>
+    <script defer src="script.js?v=3"></script>
 </body>
 </html>
