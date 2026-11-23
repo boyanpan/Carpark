@@ -688,20 +688,39 @@ def sync_street():
         print(f"[ERROR] 路邊同步失敗: {type(e).__name__}: {e}")
 
 
+_street_cache = {"t": 0, "rows": []}
+
+
+def get_cached_street_spots():
+    now = time.time()
+    if now - _street_cache["t"] < 60:
+        return _street_cache["rows"]
+    rows = db_rows("""
+        SELECT spot_id, name, lat, lng, is_vacant, remark, source_update
+        FROM street_spots
+        WHERE lat IS NOT NULL AND lng IS NOT NULL
+    """)
+    _street_cache["t"] = now
+    _street_cache["rows"] = rows
+    return rows
+
+
 @app.route("/street")
 def street():
-    """/street?lat=25.03&lng=121.50&d=0.01  → 範圍內的路邊車格（d 約 0.01 度 ≈ 1 公里）"""
+    """/street?lat=25.03&lng=121.50&d=0.01  → 範圍內的路邊車格（記憶體快取版）"""
     try:
         lat = float(request.args["lat"])
         lng = float(request.args["lng"])
         d = min(float(request.args.get("d", 0.01)), 0.05)
-        rows = db_rows("""
-            SELECT spot_id, name, lat, lng, is_vacant, remark, source_update
-            FROM street_spots
-            WHERE lat BETWEEN %s AND %s AND lng BETWEEN %s AND %s
-            LIMIT 1000
-        """, (lat - d, lat + d, lng - d, lng + d))
-        return jsonify({"street": rows})
+        lat_min, lat_max = lat - d, lat + d
+        lng_min, lng_max = lng - d, lng + d
+
+        all_rows = get_cached_street_spots()
+        matched = [
+            r for r in all_rows
+            if lat_min <= r["lat"] <= lat_max and lng_min <= r["lng"] <= lng_max
+        ][:1000]
+        return jsonify({"street": matched})
     except (KeyError, ValueError):
         return jsonify({"error": "需要 lat、lng 參數"}), 400
     except Exception as e:
