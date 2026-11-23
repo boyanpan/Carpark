@@ -1253,6 +1253,42 @@ def callback():
         return 'Invalid signature', 400
     return 'OK'
 
+@app.route("/debug_sync")
+def debug_sync():
+    out = {}
+    # 1. Render 打得到官方 API 嗎？
+    try:
+        r = requests.get(
+            "https://itaipeiparking.pma.gov.taipei/w1/GetParks/121.5654/25.0330/car/5",
+            timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        out["api_status"] = r.status_code
+        out["api_head"] = r.text[:200]
+        try:
+            out["api_count"] = len(r.json())
+        except Exception:
+            out["api_count"] = "不是 JSON"
+    except Exception as e:
+        out["api_error"] = f"{type(e).__name__}: {e}"
+    # 2. 資料庫連得上嗎？street_spots 有幾筆？
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*), MAX(synced_at) FROM street_spots")
+        out["street_rows"] = str(cur.fetchone())
+        cur.execute("SELECT MAX(last_update) FROM parking_lots")
+        out["lots_max_update"] = str(cur.fetchone())
+        cur.close(); conn.close()
+    except Exception as e:
+        out["db_error"] = f"{type(e).__name__}: {e}"
+    # 3. 實際跑一次同步，把錯誤吐出來
+    try:
+        sync_data_to_db()
+        out["sync"] = "ok"
+    except Exception as e:
+        import traceback
+        out["sync"] = traceback.format_exc()[-800:]
+    return jsonify(out)
+
 
 user_states = {}
 
@@ -1371,3 +1407,4 @@ if __name__ == "__main__":
         app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)
     except (KeyboardInterrupt, SystemExit):
         scheduler.shutdown()
+        print("[INFO] 🛑 伺服器已關閉")

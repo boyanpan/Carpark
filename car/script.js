@@ -15,7 +15,7 @@ const STATE_TEXT = { ok: '空位', low: '空位少', full: '已滿', nodata: '�
 function fetchT(url, ms = 12000) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), ms);
-    return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(t));
+    return fetch(url, { signal: ctrl.signal, cache: 'no-store' }).finally(() => clearTimeout(t));
 }
 
 // ==========================================
@@ -196,6 +196,11 @@ async function initGoogleMap() {
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePopup(); });
 
     directionsService = new google.maps.DirectionsService();
+    map.addListener('idle', () => {
+    clearTimeout(streetTimer);
+    streetTimer = setTimeout(fetchStreet, 400);
+});
+syncStreetBtn();
 
     map.addListener('dragstart', () => { if (isSheetMode() && !uiLocked()) setUIHidden(true); });
     map.addListener('dragend', () => {
@@ -220,9 +225,9 @@ async function initGoogleMap() {
     setTimeout(checkSavedParkedStatus, 1000);
 
     setInterval(() => {
-        fetchTaipeiParkingData();
-    }, 180000);
-}
+    fetchTaipeiParkingData();
+    fetchStreet();
+}, 180000);
 
 // ==========================================
 // 2. 行動端抽屜拖曳邏輯
@@ -406,6 +411,54 @@ function smartMatch(targetStr, queryStr) {
         }
     }
     return false;
+}
+
+// ===== 路邊車格圖層 =====
+let streetMarkers = [];
+let showStreet = localStorage.getItem('p_street') === '1';
+let streetTimer = null, streetSeq = 0;
+
+function clearStreet() {
+    streetMarkers.forEach(m => (m.map = null));
+    streetMarkers = [];
+}
+
+async function fetchStreet() {
+    if (!map || !showStreet) { clearStreet(); return; }
+    if (map.getZoom() < 16) { clearStreet(); return; }   // 太遠不畫，避免卡頓
+    const c = map.getCenter();
+    const b = map.getBounds().toJSON();
+    const d = Math.min(0.01, Math.max(b.north - b.south, b.east - b.west) / 2);
+    const seq = ++streetSeq;
+    try {
+        const res = await fetchT(`${API_BASE_URL}/street?lat=${c.lat()}&lng=${c.lng()}&d=${d}`, 10000);
+        if (!res.ok) throw new Error('street ' + res.status);
+        const { street = [] } = await res.json();
+        if (seq !== streetSeq) return;
+        clearStreet();
+        streetMarkers = street.map(s => {
+            const el = document.createElement('div');
+            const color = s.is_vacant === 1 ? '#22c55e' : s.is_vacant === 0 ? '#ef4444' : '#94a3b8';
+            el.style.cssText = `width:12px;height:12px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4)`;
+            return new google.maps.marker.AdvancedMarkerElement({
+                map, position: { lat: s.lat, lng: s.lng }, content: el,
+                title: `${s.name || '路邊車格'}｜${s.remark || '無資料'}`
+            });
+        });
+    } catch (e) { console.warn('路邊車格載入失敗', e); }
+}
+
+window.toggleStreet = function () {
+    showStreet = !showStreet;
+    localStorage.setItem('p_street', showStreet ? '1' : '0');
+    syncStreetBtn();
+    if (showStreet && map.getZoom() < 16) showVoiceHint('🔍 放大到街道層級才會顯示路邊車格');
+    fetchStreet();
+};
+
+function syncStreetBtn() {
+    const b = document.getElementById('streetBtn');
+    if (b) b.style.background = showStreet ? '#dcfce7' : '';
 }
 
 // ==========================================
