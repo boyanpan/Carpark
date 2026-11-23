@@ -1,6 +1,7 @@
 import os
 import re
-from sched import scheduler
+import threading
+from concurrent.futures import ThreadPoolExecutor
 import time
 import math
 import datetime
@@ -57,19 +58,231 @@ def predict_full(total_spaces: int, current_cars: int, eta_minutes: int) -> bool
 
 
 DB_CONFIG = {
-    'user': 'avnadmin',
+    'user': os.environ.get('DB_USER', 'avnadmin'),
     'password': os.environ.get('DB_PASSWORD'),
-    'host': 'mysql-12d67e59-iljsauw-7901.e.aivencloud.com',
-    'port': 11576,
-    'database': 'defaultdb',
+    'host': os.environ.get('DB_HOST', 'mysql-12d67e59-iljsauw-7901.e.aivencloud.com'),
+    'port': int(os.environ.get('DB_PORT', 11576)),
+    'database': os.environ.get('DB_NAME', 'defaultdb'),
     'ssl_ca': 'ca.pem',
 }
 
-URL_DESC = "https://tcgbusfs.blob.core.windows.net/blobtcmsv/TCMSV_alldesc.json"
-URL_AVAIL = "https://tcgbusfs.blob.core.windows.net/blobtcmsv/TCMSV_allavailable.json"
-URL_YOUBIKE = os.environ.get(
-    'YOUBIKE_URL', "https://tcgbusfs.blob.core.windows.net/dotapp/youbike/v2/youbike_immediate.json")
-TRANSFORMER = Transformer.from_crs("EPSG:3826", "EPSG:4326", always_xy=True)
+LIVE_BASE = "https://itaipeiparking.pma.gov.taipei/w1/GetParks"
+OFF_TYPES = [1, 2, 3, 4]      # 路外停車場（infoType 1~4）
+STREET_TYPE = 5               # 路邊車格
+STALE_MIN = 30                # 超過幾分鐘沒更新的資料，視為「無資料」
+
+def _grid(lat_min, lat_max, lng_min, lng_max, step):
+    pts = []
+    i = 0
+    while lat_min + i * step <= lat_max + 1e-9:
+        j = 0
+        while lng_min + j * step <= lng_max + 1e-9:
+            pts.append((round(lng_min + j * step, 5), round(lat_min + i * step, 5)))
+            j += 1
+        i += 1
+    return pts
+
+OFF_CENTERS = _grid(24.99, 25.15, 121.48, 121.62, 0.04)      # 約 20 點
+STREET_CENTERS = _grid(24.99, 25.15, 121.48, 121.62, 0.02)   # 約 72 點
+
+
+def _get_live(job):
+    lon, lat, t = job
+    try:
+        r = requests.get(f"{LIVE_BASE}/{lon}/{lat}/car/{t}", timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        return data if isinstance(data, list) else []
+    except Exception as e:
+        print(f"[WARN] ({lon},{lat}) type{t} 失敗: {type(e).__name__}: {str(e)[:100]}")
+        return []
+
+
+def fetch_live(centers, types_):
+    """多點查詢並用 parkId 去重"""
+    jobs = [(lo, la, t) for lo, la in centers for t in types_]
+    found = {}
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        for items in ex.map(_get_live, jobs):
+            for x in items:
+                pid = x.get("parkId")
+                if pid:
+                    found[pid] = x
+    return list(found.values())
+
+
+def sync_data_to_db():
+    """路外停車場：官方即時來源 → parking_lots"""
+    print("[INFO] 開始同步路外停車場（官方即時來源）...")
+    try:
+        items = [x for x in fetch_live(OFF_CENTERS, OFF_TYPES) if x.get("infoType") != 5]
+        if not items:
+            print("[ERROR] 抓不到任何路外資料，保留資料庫現有內容")
+            return
+
+        values, skipped = [], 0
+        for x in items:
+            try:
+                name = str(x.get("parkName") or "")
+                values.append((
+                    x["parkId"], name, categorize_parking(name), clean(x.get("address")),
+                    float(x["lat"]), float(x["lon"]),
+                    spot_avail(x.get("carRemainderNum")), spot_total(x.get("carTotalNum")),
+                    clean(x.get("payex")),
+                    extract_structure_type({"name": name, "address": x.get("address")}),
+                    spot_total(x.get("motorTotalNum")), spot_avail(x.get("motorRemainderNum")),
+                    spot_total(x.get("handicap_First")), spot_avail(x.get("handicap_FirstRemainderNum")),
+                    spot_total(x.get("pregnancy_First")), spot_avail(x.get("pregnancy_FirstRemainderNum")),
+                    spot_total(x.get("chargeStationTotalNum")), spot_avail(x.get("chargeStation")),
+                    x.get("updateTime") or x.get("udt"),
+                ))
+            except Exception as e:
+                skipped += 1
+                if skipped <= 3:
+                    print(f"[WARN] 略過一筆: {type(e).__name__}: {e}")
+
+        sql = """
+            INSERT INTO parking_lots
+                (id, name, category, address, lat, lng, available_car, total_car, payex, structure_type,
+                 total_motor, available_motor, total_handicap, available_handicap,
+                 total_pregnancy, available_pregnancy, total_ev, available_ev, source_update)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON DUPLICATE KEY UPDATE
+                name = VALUES(name), category = VALUES(category), address = VALUES(address),
+                lat = VALUES(lat), lng = VALUES(lng),
+                available_car = VALUES(available_car), total_car = VALUES(total_car),
+                payex = VALUES(payex), structure_type = VALUES(structure_type),
+                total_motor = VALUES(total_motor), available_motor = VALUES(available_motor),
+                total_handicap = VALUES(total_handicap), available_handicap = VALUES(available_handicap),
+                total_pregnancy = VALUES(total_pregnancy), available_pregnancy = VALUES(available_pregnancy),
+                total_ev = VALUES(total_ev), available_ev = VALUES(available_ev),
+                source_update = VALUES(source_update),
+                last_update = CURRENT_TIMESTAMP
+        """
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.executemany(sql, values)
+            # 這次沒被更新到、超過 STALE_MIN 分鐘的舊列（例如舊來源遺留的）→ 車位數清空，
+            # 不再顯示過期數字。last_update=last_update 可避免 ON UPDATE 把時間刷新。
+            cur.execute(f"""
+                UPDATE parking_lots SET
+                    available_car=NULL, available_motor=NULL, available_handicap=NULL,
+                    available_pregnancy=NULL, available_ev=NULL, last_update=last_update
+                WHERE last_update < NOW() - INTERVAL {STALE_MIN} MINUTE
+            """)
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+        print(f"[INFO] 路外同步完成 ✅（{len(values)} 筆，略過 {skipped} 筆）")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"[ERROR] 路外同步失敗: {type(e).__name__}: {e}")
+
+def init_street_table():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS street_spots (
+            spot_id VARCHAR(64) PRIMARY KEY,
+            name VARCHAR(100),
+            lat DOUBLE, lng DOUBLE,
+            is_vacant TINYINT NULL,
+            remark VARCHAR(50),
+            source_update VARCHAR(30),
+            last_update TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_pos (lat, lng)
+        )
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def sync_street():
+    print("[INFO] 開始同步路邊車格...")
+    try:
+        items = [x for x in fetch_live(STREET_CENTERS, [STREET_TYPE]) if x.get("infoType") == 5]
+        if not items:
+            print("[ERROR] 抓不到任何路邊車格，保留資料庫現有內容")
+            return
+
+        def vacant(remark):
+            if remark and "空" in remark:
+                return 1
+            if remark and "停放" in remark:
+                return 0
+            return None
+
+        rows = []
+        for x in items:
+            try:
+                rows.append((x["parkId"], x.get("parkName"), float(x["lat"]), float(x["lon"]),
+                             vacant(x.get("remark")), x.get("remark"),
+                             x.get("udt") or x.get("deviceUpdateTime") or x.get("updateTime")))
+            except Exception:
+                continue
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.executemany("""
+                INSERT INTO street_spots (spot_id, name, lat, lng, is_vacant, remark, source_update)
+                VALUES (%s,%s,%s,%s,%s,%s,%s)
+                ON DUPLICATE KEY UPDATE
+                    name=VALUES(name), lat=VALUES(lat), lng=VALUES(lng),
+                    is_vacant=VALUES(is_vacant), remark=VALUES(remark),
+                    source_update=VALUES(source_update), last_update=CURRENT_TIMESTAMP
+            """, rows)
+            cur.execute(f"""
+                UPDATE street_spots SET is_vacant=NULL, last_update=last_update
+                WHERE last_update < NOW() - INTERVAL {STALE_MIN} MINUTE
+            """)
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+        print(f"[INFO] 路邊車格同步完成 ✅（{len(rows)} 筆）")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"[ERROR] 路邊同步失敗: {type(e).__name__}: {e}")
+
+
+@app.route("/street")
+def street():
+    """/street?lat=25.03&lng=121.50&d=0.01  → 範圍內的路邊車格（d 約 0.01 度 ≈ 1 公里）"""
+    try:
+        lat = float(request.args["lat"])
+        lng = float(request.args["lng"])
+        d = min(float(request.args.get("d", 0.01)), 0.05)
+        rows = db_rows("""
+            SELECT spot_id, name, lat, lng, is_vacant, remark, source_update
+            FROM street_spots
+            WHERE lat BETWEEN %s AND %s AND lng BETWEEN %s AND %s
+            LIMIT 1000
+        """, (lat - d, lat + d, lng - d, lng + d))
+        return jsonify({"street": rows})
+    except (KeyError, ValueError):
+        return jsonify({"error": "需要 lat、lng 參數"}), 400
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
+
+NEW_COLUMNS = {
+    "total_motor": "INT",
+    "available_motor": "INT",
+    "total_handicap": "INT",
+    "available_handicap": "INT",
+    "total_pregnancy": "INT",
+    "available_pregnancy": "INT",
+    "total_ev": "INT",
+    "available_ev": "INT",
+    "source_update": "VARCHAR(30)",     # ← 新增
+}
 
 
 def get_db_connection():
@@ -898,12 +1111,22 @@ def nearby():
             "payex": r["payex"],
             "hourlyRate": parse_hourly_rate(r["payex"]),
             "structureType": r["structure_type"],
+            "sourceUpdate": r.get("source_update"),
+            "lastUpdate": str(r.get("last_update")),
         } for r in rows]
         return jsonify({"message": "success", "nearby": formatted})
     except Exception as e:
         import traceback
         traceback.print_exc()
         return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
+
+def split_hours(text: str):
+    """「台北101 3小時」→ ('台北101', 3.0)；沒寫小時預設 2"""
+    m = re.search(r'(\d+(?:\.\d+)?)\s*(?:小時|小时|hr|h)', text, re.I)
+    if m:
+        place = (text[:m.start()] + text[m.end():]).strip(' ，,')
+        return (place or text), float(m.group(1))
+    return text, 2.0
 
 
 @app.route("/api/search_places", methods=["GET"])
@@ -1124,50 +1347,27 @@ NEW_COLUMNS = {
 }
  
  
-def init_db():
+def _startup():
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS parking_lots (
-                id VARCHAR(50) PRIMARY KEY,
-                name VARCHAR(255),
-                category VARCHAR(100),
-                address TEXT,
-                lat DECIMAL(10, 8),
-                lng DECIMAL(11, 8),
-                available_car INT,
-                total_car INT,
-                payex TEXT,
-                structure_type VARCHAR(50),
-                last_update TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-            )
-        """)
-        # 舊表沒有新欄位 → 逐一補上；已存在 (errno 1060) 就略過
-        for col, typ in NEW_COLUMNS.items():
-            try:
-                cursor.execute(f"ALTER TABLE parking_lots ADD COLUMN {col} {typ} NULL")
-            except mysql.connector.Error as e:
-                if e.errno != 1060:
-                    raise
-        conn.commit()
-        cursor.close()
-        conn.close()
-        print("[INFO] Aiven 資料表已準備就緒")
-    except Exception as e:
-        print(f"[ERROR] 資料庫初始化失敗: {e}")
+        init_db()
+        init_street_table()
+        sync_data_to_db()
+        sync_street()
+    except Exception:
+        import traceback
+        traceback.print_exc()
 
-init_db()
 
-sync_data_to_db()   # 啟動時先抓一次
+# 放背景執行，資料庫連不上時也不會卡住 Render 開機
+threading.Thread(target=_startup, daemon=True).start()
 
 scheduler = BackgroundScheduler()
-scheduler.add_job(sync_data_to_db, 'interval', minutes=1)
+scheduler.add_job(sync_data_to_db, 'interval', minutes=3, max_instances=1, coalesce=True)
+scheduler.add_job(sync_street, 'interval', minutes=3, max_instances=1, coalesce=True)
 scheduler.start()
 
 if __name__ == "__main__":
     try:
-        app.run(host='0.0.0.0', port=5000, debug=False)
+        app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)
     except (KeyboardInterrupt, SystemExit):
         scheduler.shutdown()
-        print("[INFO] 🛑 伺服器已關閉")
