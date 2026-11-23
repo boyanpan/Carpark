@@ -9,7 +9,6 @@ function availState(a) {
     if (a === 0) return 'full';
     return a <= 10 ? 'low' : 'ok';
 }
-const STATE_TEXT = { ok: '空位', low: '空位少', full: '已滿', nodata: '無資料' };
 
 // 有逾時的 fetch：手機網路不穩時不會一直卡住
 function fetchT(url, ms = 12000) {
@@ -26,28 +25,20 @@ const API_BASE_URL = (window.location.hostname === 'localhost' || window.locatio
     : window.location.origin;
 
 let map, markerCluster;
-let directionsService;
-let infoWindow;
+let streetViewService, panorama;
 
 let parkingData = [];
 let userLocation = null, previousLocation = null, currentHeading = 0, hasCompass = false;
 let userMarker = null, searchedLocation = null, destMarker = null, radiusCircle = null;
-let isNavigating = false, currentDestination = null, currentTab = 'search';
+let currentTab = 'search';
 let favorites = JSON.parse(localStorage.getItem('p_favs')) || [];
 let currentSortMode = 'distance';
 let currentVehicle = localStorage.getItem('p_vehicle') === 'moto' ? 'moto' : 'car';   // car | moto
 let searchSeq = 0;          // 搜尋流水號：連續快速搜尋時，只採用最新一次的結果
 let parkingFetchSeq = 0;    // 車位資料流水號：丟棄過期的回應
 let lastListData = [];      // 目前清單上的停車場（語音「導航」用）
+let currentDetailId = null; // 目前正點開的詳情視窗停車場 ID
 window.markersMap = {};
-
-// 多路線預覽（必須在 applyLayout() 第一次執行前宣告）
-let routePolys = [];
-let routeState = null;          // { item, routes }
-let selectedRoute = 0;
-let routePreviewing = false;
-let popupOpen = false;
-function uiLocked() { return isNavigating || routePreviewing; }
 
 // 手機效能：最多畫幾個圖釘 / 卡片
 const MAX_MARKERS = 150;
@@ -67,7 +58,6 @@ function isSheetMode() {
 }
 
 // ---------- 車種（汽車 / 機車）----------
-// 目前選擇車種的車位資料：{ t: 總數, a: 剩餘（-1 = 無資料） }
 function veh(item) {
     return currentVehicle === 'moto' ? item.motor : item.car;
 }
@@ -90,18 +80,17 @@ window.setVehicle = function(v) {
     currentVehicle = (v === 'moto') ? 'moto' : 'car';
     localStorage.setItem('p_vehicle', currentVehicle);
     syncVehicleUI();
-    closePopup();
+    closeDetailModal();
     handleFilter();
 };
 syncVehicleUI();
 
-// 導航參數只帶必要欄位（避免 onclick 塞整包資料；也處理單引號）
 function navArgOf(item) {
     return encodeURIComponent(JSON.stringify({ name: item.name, lat: item.lat, lng: item.lng }))
         .replace(/'/g, '%27');
 }
 
-// 特殊車位標記：有這種車格才顯示；有即時空位寫「剩/總」，沒有就只寫格數
+// 特殊車位小標籤（清單卡片用）
 function buildSpecialChips(item) {
     const defs = [['♿', '身障', 'handicap'], ['🤰', '婦幼', 'pregnancy'], ['🔌', '電動車', 'ev']];
     const chips = defs.map(([icon, label, key]) => {
@@ -131,13 +120,12 @@ function applyLayout() {
     if (isSheetMode()) {
         if (bottomSheet) {
             bottomSheet.style.height = isSheetExpanded ? '85vh' : '35vh';
-            bottomSheet.style.transform = uiLocked() ? 'translateY(100%)' : 'translateY(0)';
+            bottomSheet.style.transform = 'translateY(0)';
         }
-        if (searchPanel) searchPanel.style.transform = uiLocked() ? 'translateY(-100%)' : 'translateY(0)';
+        if (searchPanel) searchPanel.style.transform = 'translateY(0)';
     } else {
         if (bottomSheet) { bottomSheet.style.height = ''; bottomSheet.style.transform = ''; }
         if (searchPanel) searchPanel.style.transform = '';
-        if (isLandscapePhone() && uiLocked() && sb) sb.style.transform = 'translateX(-100%)';
     }
     if (typeof google !== 'undefined' && google.maps && map) google.maps.event.trigger(map, 'resize');
 }
@@ -152,7 +140,7 @@ if (bottomSheet && window.ResizeObserver) {
     }).observe(bottomSheet);
 }
 
-// Google Maps 載入完成（由 index.html 的 callback 觸發）就啟動，不再等 window.onload
+// Google Maps 載入完成（由 index.html 的 callback 觸發）就啟動
 let appBooted = false;
 function bootApp() {
     if (appBooted) return;
@@ -167,7 +155,6 @@ function bootApp() {
 if (window.gmapsReady) bootApp();
 else window.__startApp = bootApp;
 
-// 15 秒還沒載入就提示
 setTimeout(() => {
     if (!window.gmapsReady) {
         const el = document.getElementById('content-list');
@@ -179,37 +166,47 @@ async function initGoogleMap() {
     const { Map } = await google.maps.importLibrary('maps');
     await google.maps.importLibrary('marker');
     await google.maps.importLibrary('places');
-    await google.maps.importLibrary('routes');
 
     map = new Map(document.getElementById('map'), {
         center: { lat: 25.0478, lng: 121.5170 },
         zoom: 14,
         mapId: 'DEMO_MAP_ID',
         disableDefaultUI: true,
+        streetViewControl: true, // 保留地圖右側街景小黃人
+        streetViewControlOptions: {
+            position: google.maps.ControlPosition.RIGHT_CENTER
+        },
         gestureHandling: 'greedy',
         clickableIcons: false
     });
 
-    // 關掉 Google 內建標題列（白底白 X 看不到），改用自己的 ✕；點地圖空白處 / 按 Esc 也會關閉
-    infoWindow = new google.maps.InfoWindow({ maxWidth: 320, headerDisabled: true });
-    map.addListener('click', closePopup);
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePopup(); });
+    // 初始化街景服務與監聽（拖曳小黃人或點擊「入口街景」都會自動切換介面）
+    streetViewService = new google.maps.StreetViewService();
+    panorama = map.getStreetView();
+    panorama.setOptions({
+        addressControl: true,
+        enableCloseButton: false,
+        motionTracking: false
+    });
+    panorama.addListener('visible_changed', () => {
+        const isSV = panorama.getVisible();
+        const ui = document.getElementById('ui-container');
+        const recenter = document.getElementById('recenter-btn');
+        const svBar = document.getElementById('streetview-bar');
+        if (ui) ui.classList.toggle('hidden', isSV);
+        if (recenter) recenter.classList.toggle('hidden', isSV);
+        if (svBar) svBar.classList.toggle('hidden', !isSV);
+    });
 
-    directionsService = new google.maps.DirectionsService();
-    map.addListener('idle', () => {
-    clearTimeout(streetTimer);
-    streetTimer = setTimeout(fetchStreet, 400);
-});
-syncStreetBtn();
-
-    map.addListener('dragstart', () => { if (isSheetMode() && !uiLocked()) setUIHidden(true); });
-    map.addListener('dragend', () => {
-        if (isSheetMode() && !uiLocked()) {
-            setUIHidden(false);
-            // 彈窗開著時，搜尋面板維持收起
-            if (popupOpen && searchPanel) searchPanel.style.transform = 'translateY(-100%)';
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            if (currentDetailId) closeDetailModal();
+            else if (panorama && panorama.getVisible()) closeStreetView();
         }
     });
+
+    map.addListener('dragstart', () => { if (isSheetMode()) setUIHidden(true); });
+    map.addListener('dragend', () => { if (isSheetMode()) setUIHidden(false); });
 
     if (typeof DeviceOrientationEvent !== 'undefined' &&
         typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -221,13 +218,22 @@ syncStreetBtn();
     initGPS();
     initAutocomplete();
     autoStartVoice();
-    fetchTaipeiParkingData();
+
+    // 首次抓取即時資料
+    fetchTaipeiParkingData(false);
     setTimeout(checkSavedParkedStatus, 1000);
 
+    // 每 60 秒自動在背景同步最新車位數，免手動重新整理
     setInterval(() => {
-        fetchTaipeiParkingData();
-        fetchStreet();
-    }, 180000);
+        fetchTaipeiParkingData(true);
+    }, 60000);
+
+    // 切回分頁或解鎖手機螢幕時，立刻同步一次最新車位
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            fetchTaipeiParkingData(true);
+        }
+    });
 }
 
 // ==========================================
@@ -378,12 +384,8 @@ function initGPS() {
                 map.panTo(position);
                 map.setZoom(15);
             }
-            if (isNavigating) {
-                map.panTo(position);
-                map.setZoom(18);
-            }
         },
-        (err) => { setDot('bg-red-500'); },
+        () => { setDot('bg-red-500'); },
         { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 }
     );
 }
@@ -414,62 +416,31 @@ function smartMatch(targetStr, queryStr) {
     return false;
 }
 
-// ===== 路邊車格圖層 =====
-let streetMarkers = [];
-let showStreet = localStorage.getItem('p_street') === '1';
-let streetTimer = null, streetSeq = 0;
-
-function clearStreet() {
-    streetMarkers.forEach(m => (m.map = null));
-    streetMarkers = [];
-}
-
-async function fetchStreet() {
-    if (!map || !showStreet) { clearStreet(); return; }
-    if (map.getZoom() < 16) { clearStreet(); return; }   // 太遠不畫，避免卡頓
-    const c = map.getCenter();
-    const b = map.getBounds().toJSON();
-    const d = Math.min(0.01, Math.max(b.north - b.south, b.east - b.west) / 2);
-    const seq = ++streetSeq;
-    try {
-        const res = await fetchT(`${API_BASE_URL}/street?lat=${c.lat()}&lng=${c.lng()}&d=${d}`, 10000);
-        if (!res.ok) throw new Error('street ' + res.status);
-        const { street = [] } = await res.json();
-        if (seq !== streetSeq) return;
-        clearStreet();
-        streetMarkers = street.map(s => {
-            const el = document.createElement('div');
-            const color = s.is_vacant === 1 ? '#22c55e' : s.is_vacant === 0 ? '#ef4444' : '#94a3b8';
-            el.style.cssText = `width:12px;height:12px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4)`;
-            return new google.maps.marker.AdvancedMarkerElement({
-                map, position: { lat: s.lat, lng: s.lng }, content: el,
-                title: `${s.name || '路邊車格'}｜${s.remark || '無資料'}`
-            });
-        });
-    } catch (e) { console.warn('路邊車格載入失敗', e); }
-}
-
-window.toggleStreet = function () {
-    showStreet = !showStreet;
-    localStorage.setItem('p_street', showStreet ? '1' : '0');
-    syncStreetBtn();
-    if (showStreet && map.getZoom() < 16) showVoiceHint('🔍 放大到街道層級才會顯示路邊車格');
-    fetchStreet();
-};
-
-function syncStreetBtn() {
-    const b = document.getElementById('streetBtn');
-    if (b) b.style.background = showStreet ? '#dcfce7' : '';
-}
-
 // ==========================================
-// 4. 車位資料
+// 4. 車位資料（支援背景靜默自動更新）
 // ==========================================
-async function fetchTaipeiParkingData() {
-    const seq = ++parkingFetchSeq;      // 每次請求一個流水號，回來時若已過期就丟掉
+function extractMaxHourlyRate(payex, fallbackRate) {
+    if (payex) {
+        if ((payex.includes('免費') || payex.includes('不收費')) && !/\d+\s*元/.test(payex)) {
+            return 0;
+        }
+        const matches = [...payex.matchAll(/(\d+)\s*元\s*[/／每]\s*(?:小時|小时|時|hr|HR)/g)];
+        if (matches.length > 0) {
+            return Math.max(...matches.map(m => parseInt(m[1], 10)));
+        }
+        const matches2 = [...payex.matchAll(/每\s*(?:小時|時)\s*(\d+)\s*元/g)];
+        if (matches2.length > 0) {
+            return Math.max(...matches2.map(m => parseInt(m[1], 10)));
+        }
+    }
+    return (fallbackRate !== null && fallbackRate !== undefined) ? Number(fallbackRate) : null;
+}
+
+async function fetchTaipeiParkingData(silent = false) {
+    const seq = ++parkingFetchSeq;
     try {
         const listEl = document.getElementById('content-list');
-        if (listEl && parkingData.length === 0) {
+        if (!silent && listEl && parkingData.length === 0) {
             listEl.innerHTML = `<div class="text-center py-20 text-slate-400 font-bold animate-pulse">📡 正在從雲端讀取即時車位...</div>`;
         }
 
@@ -484,7 +455,6 @@ async function fetchTaipeiParkingData() {
         const result = await res.json();
         if (seq !== parkingFetchSeq) return;
 
-        // 後端沒有資料（null / -9）一律用 -1 代表「無資料」
         const left = (v) => (v === null || v === undefined || Number(v) < 0) ? -1 : Number(v);
         const total = (v) => Number(v) > 0 ? Number(v) : 0;
 
@@ -515,7 +485,6 @@ async function fetchTaipeiParkingData() {
                 }
             }
 
-            // 沒有費率資料就如實顯示，不再用假價格補
             const rawPayex = (p.payex || '').trim();
             const finalPayex = (!rawPayex || rawPayex === '現場公告' || rawPayex === '無')
                 ? '費率以現場公告為準'
@@ -529,7 +498,11 @@ async function fetchTaipeiParkingData() {
                 lng: parseFloat(p.lng),
                 address: p.address || '無地址',
                 payex: finalPayex,
+                hourlyRate: extractMaxHourlyRate(finalPayex, p.hourlyRate),
                 category: p.category || '一般停車場',
+                structureType: p.structureType || '',
+                serviceTime: p.serviceTime || '',
+                tel: p.tel || '',
                 car:   { t: total(p.totalcar),   a: left(p.availablecar) },
                 motor: { t: total(p.totalmotor), a: left(p.availablemotor) },
                 special: {
@@ -540,12 +513,19 @@ async function fetchTaipeiParkingData() {
                 transit: p.transit || mockTransit
             };
         });
+
         handleFilter();
+
+        // 若使用者正開著某個停車場的詳情視窗，同步刷新視窗內的最新數字
+        if (currentDetailId) {
+            const latestItem = parkingData.find(p => p.id === currentDetailId);
+            if (latestItem) renderDetailModal(latestItem);
+        }
     } catch (err) {
-        if (seq !== parkingFetchSeq) return;
+        if (seq !== parkingFetchSeq || silent) return;
         const listEl = document.getElementById('content-list');
         if (listEl) listEl.innerHTML = `<div class="pk-empty">無法連接伺服器<br><small>${esc(err.name === 'AbortError' ? '連線逾時' : err.message)}</small>
-            <br><button class="pk-go" style="margin-top:10px" onclick="fetchTaipeiParkingData()">重試</button></div>`;
+            <br><button class="pk-go" style="margin-top:10px" onclick="fetchTaipeiParkingData(false)">重試</button></div>`;
     }
 }
 
@@ -562,7 +542,6 @@ async function fetchGooglePlacesFromBackend(queryStr) {
 // ==========================================
 // 5. 搜尋功能
 // ==========================================
-// 瀏覽器端的 Google Places 搜尋（和下拉聯想同一套服務，通常最快）
 function clientPlaceSearch(q) {
     return new Promise(resolve => {
         try {
@@ -579,7 +558,6 @@ function clientPlaceSearch(q) {
     });
 }
 
-// 前端與後端同時查，誰先找到就用誰（兩個都找不到才算失敗）
 function findPlace(q) {
     return new Promise(resolve => {
         let pending = 2, done = false;
@@ -627,12 +605,12 @@ async function searchLocation() {
 
     try {
         const place = await findPlace(rawQuery);
-        if (mySeq !== searchSeq) return;        // 這段期間又搜尋了別的，這個結果作廢
+        if (mySeq !== searchSeq) return;
         if (place) {
             searchedLocation = [parseFloat(place.lat), parseFloat(place.lng)];
             createSearchMarker(place.name, searchedLocation[0], searchedLocation[1], place.address);
-            handleFilter();                     // 先用現有資料立刻重新排序，畫面馬上有反應
-            fetchTaipeiParkingData();           // 再到背景更新最新車位
+            handleFilter();
+            fetchTaipeiParkingData(true);
         } else {
             if (listEl) listEl.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">找不到「${esc(rawQuery)}」</div>`;
         }
@@ -654,7 +632,7 @@ function clearSearchAndLocate() {
     if (destMarker) destMarker.map = null;
     if (radiusCircle) radiusCircle.setMap(null);
 
-    fetchTaipeiParkingData();
+    fetchTaipeiParkingData(true);
 
     if (userLocation && map) {
         map.panTo({ lat: userLocation[0], lng: userLocation[1] });
@@ -677,7 +655,6 @@ function handleFilter() {
     if (parkingData.length === 0) return;
     let data = (currentTab === 'search') ? [...parkingData] : parkingData.filter(p => favorites.includes(p.id));
 
-    // 車種篩選：只留下有這種車位的停車場
     data = data.filter(hasVehSpots);
 
     const radiusSelect = document.getElementById('radiusSelect');
@@ -715,22 +692,23 @@ function handleFilter() {
         if (currentSortMode === 'distance') {
             data.sort((a, b) => a.distance - b.distance);
         } else if (currentSortMode === 'price') {
-            const getPriceValue = (str) => {
-                if (!str) return 999;
+            const getPriceValue = (item) => {
+                if (item.hourlyRate !== null && item.hourlyRate !== undefined) return item.hourlyRate;
+                const str = item.payex || '';
                 if (str.includes('免費') || str.includes('不收費')) return 0;
                 const match = str.match(/(\d+)/);
                 return match ? parseInt(match[1], 10) : 999;
             };
 
             data.sort((a, b) => {
-                const priceA = getPriceValue(a.payex);
-                const priceB = getPriceValue(b.payex);
+                const priceA = getPriceValue(a);
+                const priceB = getPriceValue(b);
                 if (priceA !== priceB) return priceA - priceB;
                 return a.distance - b.distance;
             });
         }
     } else if (window.currentKeyword) {
-         data.sort((a, b) => a.name.localeCompare(b.name));
+        data.sort((a, b) => a.name.localeCompare(b.name));
     }
 
     lastListData = data;
@@ -738,7 +716,6 @@ function handleFilter() {
     renderList(data.slice(0, MAX_CARDS), !!searchedLocation);
 }
 
-// 點圖釘：清單捲到對應卡片即可（不再展開抽屜，避免蓋住地圖和彈窗）
 window.highlightCardInList = function(id) {
     const targetCard = document.getElementById(`card-${id}`);
     if (targetCard) {
@@ -748,41 +725,190 @@ window.highlightCardInList = function(id) {
     }
 };
 
-// 地圖彈窗：只留 剩餘車位 / 名稱 / 地址 / 費率 / 特殊車位 / 導航
-function openMarkerPopup(item, marker) {
-    const v = veh(item);
-    const state = availState(v.a);
-    const html = `
-        <div class="pk-pop">
-            <button class="pk-close" onclick="closePopup()" aria-label="關閉">✕</button>
-            <div class="pk-pop-head is-${state}">
-                <strong>${state === 'nodata' ? '—' : v.a}</strong>
-                <span>${vehLabel()}${STATE_TEXT[state]}<br><em>共 ${v.t} 位</em></span>
-            </div>
-            <div class="pk-pop-body">
-                <h3>${esc(item.name)}</h3>
-                <p class="pk-addr">${esc(item.address)}</p>
-                <p class="pk-price">${esc(item.payex)}</p>
-                ${buildSpecialChips(item)}
-                <button class="pk-go pk-go-wide" onclick="startNav('${navArgOf(item)}')">開始導航</button>
-            </div>
+// ==========================================
+// 7. 停車場詳細資訊彈窗 + Google 導航 + 入口街景
+// ==========================================
+function renderCapacityBar(bgClass, svgIcon, avail, total) {
+    let rightHtml;
+    if (avail >= 0 && total > 0) {
+        rightHtml = `<span class="text-sm font-medium">剩餘 <strong class="text-2xl font-extrabold mx-0.5 tracking-tight">${avail}</strong> /總 ${total}</span>`;
+    } else if (avail >= 0) {
+        rightHtml = `<span class="text-sm font-medium">剩餘 <strong class="text-2xl font-extrabold mx-0.5 tracking-tight">${avail}</strong> 位</span>`;
+    } else if (total > 0) {
+        rightHtml = `<span class="text-sm font-medium">總車位 <strong class="text-xl font-bold mx-0.5">${total}</strong> 位（無即時）</span>`;
+    } else {
+        rightHtml = `<span class="text-sm font-medium opacity-90">無資料</span>`;
+    }
+
+    return `
+        <div class="${bgClass} px-5 py-3 flex items-center justify-between text-white">
+            <div class="w-10 h-8 flex items-center justify-center shrink-0">${svgIcon}</div>
+            <div>${rightHtml}</div>
         </div>`;
-    infoWindow.setContent(html);
-    infoWindow.open(map, marker);
-    popupOpen = true;
-    // 手機上讓出頂部空間，關閉彈窗後再放回來
-    if (isSheetMode() && searchPanel) searchPanel.style.transform = 'translateY(-100%)';
-    map.panTo(marker.position);
 }
 
-function closePopup() {
-    if (infoWindow) infoWindow.close();
-    popupOpen = false;
-    if (isSheetMode() && !uiLocked() && searchPanel) searchPanel.style.transform = 'translateY(0)';
+function renderDetailModal(item) {
+    const modal = document.getElementById('detail-modal');
+    const card = document.getElementById('detail-modal-card');
+    if (!modal || !card || !item) return;
+
+    const hoursText = item.serviceTime || (item.payex.includes('24小時') ? '24小時營業' : '依現場公告');
+    const handicapNote = item.payex.includes('身障') ? '詳見下方收費方式' : '依現場公告';
+    const modeText = [item.category, item.structureType ? `${item.structureType}停車場` : '']
+        .filter(Boolean).join(' · ') || '一般停車場';
+
+    let rateBlockHtml = '';
+    if (item.hourlyRate === 0) {
+        rateBlockHtml = `
+            <div class="my-4 text-center">
+                <div class="text-xs text-slate-500 font-bold mb-0.5">收費標準</div>
+                <div class="text-2xl font-extrabold text-emerald-600">免費停車</div>
+            </div>`;
+    } else if (item.hourlyRate !== null && item.hourlyRate !== undefined) {
+        rateBlockHtml = `
+            <div class="my-4 text-center">
+                <div class="text-xs text-slate-500 font-bold mb-0.5">最高費率</div>
+                <div class="text-slate-600 font-extrabold">
+                    <span class="text-4xl text-slate-700 tracking-tight">${item.hourlyRate}</span><span class="text-xs ml-0.5">/時</span>
+                </div>
+            </div>`;
+    } else {
+        rateBlockHtml = `
+            <div class="my-4 text-center">
+                <div class="text-xs text-slate-500 font-bold mb-0.5">費率說明</div>
+                <div class="text-base font-extrabold text-slate-600">依現場公告</div>
+            </div>`;
+    }
+
+    const carSvg = `<svg viewBox="0 0 24 24" fill="currentColor" class="w-9 h-9"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/></svg>`;
+    const motoSvg = `<svg viewBox="0 0 24 24" fill="currentColor" class="w-9 h-9"><path d="M19 7c0-1.1-.9-2-2-2h-3v2h3v2.65L13.52 14H10V9H6c-2.21 0-4 1.79-4 4v3h2c0 1.66 1.34 3 3 3s3-1.34 3-3h4.48L19 10.35V7zM7 17c-.55 0-1-.45-1-1h2c0 .55-.45 1-1 1zm12-4c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3zm0 4c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1z"/></svg>`;
+    const handiSvg = `<svg viewBox="0 0 24 24" fill="currentColor" class="w-8 h-8"><circle cx="12" cy="4" r="2"/><path d="M19 13v-2c-1.54.02-3.09-.75-4.07-1.83l-1.29-1.43c-.17-.19-.38-.34-.61-.45-.01 0-.01-.01-.02-.01H13c-.35-.2-.75-.3-1.19-.26C10.76 7.11 10 8.04 10 9.09V15c0 1.1.9 2 2 2h5v5h2v-5.5c0-1.1-.9-2-2-2h-3v-3.45c1.29 1.07 3.25 1.94 5 1.95zm-6.17 5c-.41 1.16-1.52 2-2.83 2-1.66 0-3-1.34-3-3 0-1.31.84-2.41 2-2.83V12.1c-2.28.46-4 2.48-4 4.9 0 2.76 2.24 5 5 5 2.42 0 4.44-1.72 4.9-4h-2.07z"/></svg>`;
+    const pregSvg = `<svg viewBox="0 0 24 24" fill="currentColor" class="w-8 h-8"><circle cx="11" cy="4" r="2"/><path d="M16 13c0-1.67-1.15-3.08-2.7-3.47C12.92 8.09 11.61 7 10 7c-1.66 0-3 1.34-3 3v7h2v5h3v-5h3v-2c.61-.55 1-1.34 1-2z"/></svg>`;
+    const evSvg = `<svg viewBox="0 0 24 24" fill="currentColor" class="w-8 h-8"><path d="M16.01 7L16 3h-2v4h-4V3H8v4h-.01C7 6.99 6 7.99 6 8.99v5.49L9.5 18v3h5v-3l3.5-3.51v-5.5c0-1-1-2-1.99-1.99zM11 15v-3H9l4-5v3h2l-4 5z"/></svg>`;
+
+    const navArg = navArgOf(item);
+    const sp = item.special || { handicap: { a: -1, t: 0 }, pregnancy: { a: -1, t: 0 }, ev: { a: -1, t: 0 } };
+
+    card.innerHTML = `
+        <div class="flex-1 overflow-y-auto p-5 no-scrollbar">
+            <div class="flex items-start justify-between gap-2">
+                <h2 class="text-xl font-extrabold text-[#0f766e] leading-snug">${esc(item.name)}</h2>
+                <button onclick="closeDetailModal()" aria-label="關閉" class="text-slate-600 hover:text-slate-900 text-2xl leading-none p-1 shrink-0 cursor-pointer">✕</button>
+            </div>
+
+            <div class="mt-3 space-y-2 text-sm text-slate-700 font-medium">
+                <div class="flex items-center gap-2.5">
+                    <span class="w-5 text-center text-slate-500 shrink-0">🕒</span>
+                    <span class="font-bold text-slate-800">${esc(hoursText)}</span>
+                </div>
+                <div class="flex items-start gap-2.5">
+                    <span class="w-5 text-center text-slate-500 shrink-0">📍</span>
+                    <span>${esc(item.address)}</span>
+                </div>
+                ${item.tel ? `
+                <div class="flex items-center gap-2.5">
+                    <span class="w-5 text-center text-slate-500 shrink-0">📞</span>
+                    <span>${esc(item.tel)}</span>
+                </div>` : ''}
+                <div class="flex items-center gap-2.5">
+                    <span class="w-5 text-center text-slate-500 shrink-0">♿</span>
+                    <span>是否有身障優惠：${esc(handicapNote)}</span>
+                </div>
+                <div class="flex items-center gap-2.5">
+                    <span class="w-5 text-center text-slate-500 shrink-0">💼</span>
+                    <span>停車場類型：${esc(modeText)}</span>
+                </div>
+            </div>
+
+            ${rateBlockHtml}
+
+            <div class="rounded-lg overflow-hidden shadow-sm">
+                ${renderCapacityBar('bg-[#6ba5d1]', carSvg, item.car.a, item.car.t)}
+                ${renderCapacityBar('bg-[#f3b562]', motoSvg, item.motor.a, item.motor.t)}
+                ${renderCapacityBar('bg-[#808285]', handiSvg, sp.handicap.a, sp.handicap.t)}
+                ${renderCapacityBar('bg-[#d47a84]', pregSvg, sp.pregnancy.a, sp.pregnancy.t)}
+                ${renderCapacityBar('bg-[#57b889]', evSvg, sp.ev.a, sp.ev.t)}
+            </div>
+
+            <div class="mt-4">
+                <div class="text-sm font-bold text-[#0284c7] mb-1">收費方式</div>
+                <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-line">${esc(item.payex)}</p>
+            </div>
+        </div>
+
+        <div class="p-4 pt-3 bg-white border-t border-slate-100 flex gap-3 shrink-0">
+            <button onclick="openStreetView('${navArg}')" class="flex-1 bg-[#0277bd] hover:bg-[#01579b] active:scale-95 text-white font-bold py-3 rounded-xl text-base transition cursor-pointer shadow-sm">
+                入口街景
+            </button>
+            <button onclick="startNav('${navArg}')" class="flex-1 bg-[#0277bd] hover:bg-[#01579b] active:scale-95 text-white font-bold py-3 rounded-xl text-base transition cursor-pointer shadow-sm">
+                停車導航
+            </button>
+        </div>
+    `;
+
+    modal.classList.remove('hidden');
 }
+
+function openMarkerPopup(item) {
+    currentDetailId = item.id;
+    renderDetailModal(item);
+    if (map) {
+        map.panTo({ lat: item.lat, lng: item.lng });
+    }
+}
+
+window.closeDetailModal = function() {
+    currentDetailId = null;
+    const modal = document.getElementById('detail-modal');
+    if (modal) modal.classList.add('hidden');
+};
+
+// 入口街景模式
+window.openStreetView = function(itemStr) {
+    const item = JSON.parse(decodeURIComponent(itemStr));
+    if (!streetViewService || !panorama) {
+        alert("街景服務尚未載入完成，請稍候再試！");
+        return;
+    }
+
+    const targetPos = { lat: item.lat, lng: item.lng };
+    streetViewService.getPanorama(
+        {
+            location: targetPos,
+            radius: 100,
+            preference: google.maps.StreetViewPreference.NEAREST
+        },
+        (data, status) => {
+            if (status === google.maps.StreetViewStatus.OK && data && data.location) {
+                closeDetailModal();
+                const titleEl = document.getElementById('streetview-title');
+                if (titleEl) titleEl.textContent = item.name;
+
+                // 自動計算從街景拍攝點望向停車場入口的方位角
+                let heading = 0;
+                if (google.maps.geometry && google.maps.geometry.spherical) {
+                    heading = google.maps.geometry.spherical.computeHeading(
+                        data.location.latLng,
+                        new google.maps.LatLng(targetPos.lat, targetPos.lng)
+                    );
+                }
+
+                panorama.setPano(data.location.pano);
+                panorama.setPov({ heading, pitch: 0 });
+                panorama.setVisible(true);
+            } else {
+                alert("此停車場入口附近暫無 Google 街景影像！");
+            }
+        }
+    );
+};
+
+window.closeStreetView = function() {
+    if (panorama) panorama.setVisible(false);
+};
 
 // ==========================================
-// 7. 圖標與清單渲染
+// 8. 圖標與清單渲染
 // ==========================================
 function renderMapMarkers(data) {
     if (!map) return;
@@ -803,7 +929,7 @@ function renderMapMarkers(data) {
         });
 
         marker.addListener('click', () => {
-            openMarkerPopup(item, marker);
+            openMarkerPopup(item);
             highlightCardInList(item.id);
         });
 
@@ -818,12 +944,10 @@ function renderMapMarkers(data) {
         markerCluster.clearMarkers();
         markerCluster.addMarkers(markers);
     } else {
-        // 叢集套件還沒載入：先直接放到地圖上
         markers.forEach(m => (m.map = map));
     }
 }
 
-// 清單卡片：左邊汽車/機車各自的空位，右邊是名稱、距離、費率、特殊車位、轉乘
 function renderList(data, isUsingDest) {
     const listEl = document.getElementById('content-list');
     if (!listEl) return;
@@ -890,25 +1014,21 @@ function selectCard(id, lat, lng) {
         activeCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
-    if (window.markersMap && window.markersMap[id]) {
-        const item = parkingData.find(p => p.id === id);
-        if (item) openMarkerPopup(item, window.markersMap[id]);
-    }
+    const item = parkingData.find(p => p.id === id);
+    if (item) openMarkerPopup(item);
 }
 
 // ==========================================
-// 9. 下拉智慧聯想選單 (帶有專注模式開關控制)
+// 9. 下拉智慧聯想選單
 // ==========================================
 function initAutocomplete() {
     const searchInput = document.getElementById('searchInput');
     if (!searchInput) return;
 
-    // 點擊搜尋框時：進入專注模式（暫時隱藏地圖與清單）
     searchInput.addEventListener('focus', () => {
         document.body.classList.add('is-searching');
     });
 
-    // 失去焦點時離開專注模式
     searchInput.addEventListener('blur', () => {
         setTimeout(() => {
             if (document.activeElement !== searchInput) {
@@ -940,212 +1060,20 @@ function initAutocomplete() {
 
         createSearchMarker(name, lat, lng, address);
         handleFilter();
-        fetchTaipeiParkingData();
+        fetchTaipeiParkingData(true);
         collapseBottomSheet();
     });
 }
 
 // ==========================================
-// 10. 導航功能（多路線選擇）
+// 10. 外部 Google 地圖導航
 // ==========================================
-function clearRoutes() {
-    routePolys.forEach(p => p.setMap(null));
-    routePolys = [];
-    routeState = null;
-}
-
-function styleRoutes() {
-    routePolys.forEach((p, i) => {
-        const sel = i === selectedRoute;
-        p.setOptions({ strokeColor: sel ? '#2563eb' : '#94a3b8', strokeWeight: sel ? 8 : 6, zIndex: sel ? 10 : 1 });
-    });
-}
-
-function drawRoutes() {
-    routePolys.forEach(p => p.setMap(null));
-    routePolys = routeState.routes.map((r, i) => {
-        const poly = new google.maps.Polyline({
-            map, path: r.overview_path, strokeOpacity: 0.9, clickable: true
-        });
-        poly.addListener('click', () => { if (routePreviewing) selectRoute(i); });
-        return poly;
-    });
-    styleRoutes();
-}
-
-function legTime(leg) { return leg.duration_in_traffic || leg.duration; }
-
-function ensureRoutePicker() {
-    let el = document.getElementById('route-picker');
-    if (el) return el;
-    el = document.createElement('div');
-    el.id = 'route-picker';
-    el.className = 'hidden';
-    document.body.appendChild(el);
-    return el;
-}
-
-function renderRoutePicker() {
-    const el = ensureRoutePicker();
-    const { item, routes } = routeState;
-    const fastest = Math.min(...routes.map(r => legTime(r.legs[0]).value));
-
-    el.innerHTML = `
-        <div class="rp-head">
-            <strong>選擇路線</strong>
-            <span>前往 ${esc(item.name)}</span>
-        </div>
-        <div class="rp-list">
-            ${routes.map((r, i) => {
-                const leg = r.legs[0];
-                const t = legTime(leg);
-                const tags = [];
-                if (t.value === fastest) tags.push('<em class="rp-tag">最快</em>');
-                if (r.warnings && r.warnings.length) tags.push('<em class="rp-tag warn">注意</em>');
-                return `
-                <button type="button" class="rp-card ${i === selectedRoute ? 'sel' : ''}" onclick="selectRoute(${i})">
-                    <span class="rp-time">${esc(t.text)}</span>
-                    <span class="rp-meta">${esc(leg.distance.text)}${r.summary ? '・經 ' + esc(r.summary) : ''}</span>
-                    ${tags.join('')}
-                </button>`;
-            }).join('')}
-        </div>
-        <div class="rp-actions">
-            <button type="button" class="rp-cancel" onclick="cancelRoutePreview()">取消</button>
-            <button type="button" class="pk-go" onclick="confirmRoute()">開始導航</button>
-        </div>`;
-    el.classList.remove('hidden');
-}
-
-window.selectRoute = function(i) {
-    if (!routeState || !routeState.routes || !routeState.routes[i]) return;
-    selectedRoute = i;
-    styleRoutes();
-    if (routePreviewing) {
-        renderRoutePicker();
-        map.fitBounds(routeState.routes[i].bounds, { top: 60, bottom: 280, left: 40, right: 40 });
-    }
-};
-
-window.cancelRoutePreview = function() {
-    routePreviewing = false;
-    clearRoutes();
-    const el = document.getElementById('route-picker');
-    if (el) el.classList.add('hidden');
-    setUIHidden(false);
-};
-
-window.confirmRoute = function() {
-    if (!routeState) return;
-    beginNavigation(selectedRoute);
-};
-
-function arrowOf(html) {
-    if (html.includes('迴轉')) return '↩️';
-    if (html.includes('右')) return '➡️';
-    if (html.includes('左')) return '⬅️';
-    return '⬆️';
-}
-
-// 真正開始導航（使用者選好路線後）
-function beginNavigation(idx) {
-    const { item, routes } = routeState;
-    const route = routes ? routes[idx] : null;
-
-    isNavigating = true;
-    routePreviewing = false;
-    currentDestination = item;
-
-    const picker = document.getElementById('route-picker');
-    if (picker) picker.classList.add('hidden');
-    const navHeader = document.getElementById('nav-header');
-    if (navHeader) navHeader.classList.add('active');
-    setUIHidden(true);
-
-    // 只保留選定的那條
-    routePolys.forEach((p, i) => { if (i !== idx) p.setMap(null); });
-
-    const navInstruction = document.getElementById('nav-instruction');
-    const navMetrics = document.getElementById('nav-metrics');
-    const navArrow = document.getElementById('nav-arrow');
-
-    if (route) {
-        const leg = route.legs[0];
-        const step = leg.steps[0];
-        if (navArrow) navArrow.innerText = arrowOf(step.instructions);
-        const clean = step.instructions.replace(/<[^>]*>?/gm, '');
-        if (navInstruction) navInstruction.innerText = `${step.distance.text} 後，${clean}`;
-        if (navMetrics) navMetrics.innerText = `🏁 總剩餘 ${leg.distance.text} | 約 ${legTime(leg).text} 抵達`;
-        map.fitBounds(route.bounds);
-    } else {
-        if (navInstruction) navInstruction.innerText = `前往：${item.name}`;
-        if (navMetrics) navMetrics.innerText = `🚗 即時定位跟隨中`;
-    }
-
-    setTimeout(() => {
-        if (isNavigating && userLocation) {
-            map.panTo({ lat: userLocation[0], lng: userLocation[1] });
-            map.setZoom(18);
-        }
-    }, 2500);
-}
-
 window.startNav = function(itemStr) {
     const item = JSON.parse(decodeURIComponent(itemStr));
-    if (!userLocation) return alert("等待 GPS 定位中，請確保已開啟定位權限！");
-    if (!directionsService) return alert("地圖尚未載入完成，請稍候再試！");
-
-    // 清掉上一次的預覽 / 路線
-    clearRoutes();
-    popupOpen = false;
-    if (infoWindow) infoWindow.close();
-
-    const request = {
-        origin: new google.maps.LatLng(userLocation[0], userLocation[1]),
-        destination: new google.maps.LatLng(item.lat, item.lng),
-        travelMode: google.maps.TravelMode.DRIVING,
-        provideRouteAlternatives: true,
-        drivingOptions: { departureTime: new Date(), trafficModel: 'bestguess' },
-        region: 'TW'
-    };
-
-    directionsService.route(request, function(result, status) {
-        if (status === google.maps.DirectionsStatus.OK && result.routes.length) {
-            routeState = { item, routes: result.routes };
-            selectedRoute = 0;
-            drawRoutes();
-
-            if (result.routes.length === 1) {
-                beginNavigation(0);          // 只有一條就直接開始
-            } else {
-                routePreviewing = true;
-                setUIHidden(true);
-                renderRoutePicker();
-                map.fitBounds(result.routes[0].bounds, { top: 60, bottom: 280, left: 40, right: 40 });
-            }
-        } else {
-            // 算不到路線：退回「只跟隨定位」
-            routeState = { item, routes: null };
-            beginNavigation(0);
-        }
-    });
-};
-
-window.stopNavigation = function() {
-    isNavigating = false;
-    routePreviewing = false;
-    currentDestination = null;
-    const navHeader = document.getElementById('nav-header');
-    if (navHeader) navHeader.classList.remove('active');
-    const picker = document.getElementById('route-picker');
-    if (picker) picker.classList.add('hidden');
-    clearRoutes();
-    setUIHidden(false);
-
-    const ref = searchedLocation || userLocation;
-    if (ref && map) {
-        map.panTo({ lat: ref[0], lng: ref[1] });
-        map.setZoom(15);
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${item.lat},${item.lng}&travelmode=driving`;
+    const win = window.open(url, '_blank', 'noopener');
+    if (!win) {
+        window.location.href = url;
     }
 };
 
@@ -1167,13 +1095,13 @@ window.switchTab = function(tab) {
         tabFav.classList.toggle('border-transparent', tab !== 'fav');
     }
     handleFilter();
-}
+};
 
 window.toggleFav = function(id) {
     favorites = favorites.includes(id) ? favorites.filter(f => f !== id) : [...favorites, id];
     localStorage.setItem('p_favs', JSON.stringify(favorites));
     handleFilter();
-}
+};
 
 function createSearchMarker(name, lat, lng, address = "") {
     if (destMarker) destMarker.map = null;
@@ -1190,7 +1118,6 @@ function createSearchMarker(name, lat, lng, address = "") {
     map.setZoom(16);
 }
 
-// 轉乘估算：compact = true 時只留一行（清單用）
 function buildSmartTransitBadge(item, compact) {
     if (!item || !item.transit) return '';
     const L = { walk: ['🚶', '步行'], youbike: ['🚲', 'YouBike'], mrt: ['🚇', '捷運'], bus: ['🚌', '公車'] };
@@ -1204,21 +1131,14 @@ function buildSmartTransitBadge(item, compact) {
 }
 
 // ==========================================
-// 12. 語音控制（流暢版）與愛車計時
+// 12. 語音控制與愛車計時
 // ==========================================
-// 設計重點：
-//  1. 每一輪辨識都建立全新物件，說完（或停頓超過 COMMIT_IDLE_MS）就立刻送出指令並馬上重開，不等瀏覽器慢慢判斷
-//  2. 搜尋與聽下一句互不阻塞：搜尋還在跑的時候就可以直接說下一個
-//  3. 預設「免喚醒」：開著就一直聽，每說一句就執行一句；長按按鈕可切換成「喚醒詞模式」
-//  4. 看門狗：重開失敗、卡住、切回前景、網路恢復都會自動救回來
-
-const COMMIT_IDLE_MS = 700;         // 說話停頓這麼久就視為說完（越小越快，太小會把話切斷）
-const ACTIVE_WINDOW_MS = 8000;      // 喚醒詞模式：喚醒後等指令的時間
-// 喚醒詞：把「P」常被聽成的字都列進去，也可自行增減
+const COMMIT_IDLE_MS = 700;
+const ACTIVE_WINDOW_MS = 8000;
 const WAKE_RE = /(嗨|哈囉|哈嘍|hey|hi|你好)?[\s，,]*(小\s*(?:p|pi|皮|批|比|匹|屁|痞|琵|披|啤|劈|派)|p\s*finder|皮\s*finder|停車助手|停車小幫手)/i;
 
 let voiceRecognition = null;
-let voiceMode = 'off';              // off | free（免喚醒）| standby（等喚醒詞）| active（已喚醒）
+let voiceMode = 'off';
 let voiceWakePref = localStorage.getItem('p_voice_wake') === '1';
 let voiceErrCount = 0;
 let voiceRestartTimer = null;
@@ -1229,7 +1149,6 @@ let wakeLock = null;
 let lastCmd = '', lastCmdAt = 0;
 let voiceLongPressed = false;
 
-// ---------- 小工具（純函式）----------
 function cleanSpeech(raw) {
     return String(raw || '')
         .replace(/[。？！，、；：,.?!;:~～…「」『』"'“”]/g, '')
@@ -1241,7 +1160,6 @@ function stripWake(text) {
     return text.replace(WAKE_RE, '').replace(/^[\s，,。]+/, '').trim();
 }
 
-// 把「我要去台北車站附近的停車場」變成「台北車站」
 function extractKeyword(cmd) {
     const orig = cmd.trim();
     let kw = orig
@@ -1253,7 +1171,6 @@ function extractKeyword(cmd) {
     return kw || orig;
 }
 
-// ---------- 畫面提示 ----------
 function showVoiceHint(text) {
     let el = document.getElementById('voice-hint');
     if (!el) {
@@ -1264,8 +1181,7 @@ function showVoiceHint(text) {
             'font-weight:600;z-index:100001;pointer-events:none;transition:opacity .25s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
         document.body.appendChild(el);
     }
-    // 手機：浮在清單抽屜上方；其他情況貼近底部
-    const sheetH = (isSheetMode() && !uiLocked() && bottomSheet) ? Math.round(bottomSheet.getBoundingClientRect().height) + 12 : 24;
+    const sheetH = (isSheetMode() && bottomSheet) ? Math.round(bottomSheet.getBoundingClientRect().height) + 12 : 24;
     el.style.bottom = `calc(${sheetH}px + env(safe-area-inset-bottom))`;
     el.textContent = text;
     voiceBarSay(text);
@@ -1303,13 +1219,11 @@ function setVoiceBtn(mode) {
     }
 }
 
-// 聽到有人說話時，按鈕外圈亮綠光
 function setMicActive(on) {
     const btn = document.getElementById('voiceBtn');
     if (btn) btn.style.boxShadow = on ? '0 0 0 4px rgba(34,197,94,.45)' : '';
 }
 
-// ---------- 搜尋區的語音狀態列（常駐顯示：聆聽中 / 辨識到的文字 / 執行結果）----------
 let voiceBarTimer = null;
 
 function ensureVoiceBar() {
@@ -1349,7 +1263,6 @@ function updateVoiceBar(mode) {
     el.querySelector('#voice-bar-text').textContent = voiceIdleText(mode);
 }
 
-// 顯示辨識到的文字 / 執行結果，幾秒後自動回到「持續聆聽中」
 function voiceBarSay(text) {
     if (voiceMode === 'off') return;
     const el = ensureVoiceBar();
@@ -1371,7 +1284,6 @@ async function holdScreen(on) {
     } catch (e) { wakeLock = null; }
 }
 
-// ---------- 喚醒詞模式的狀態切換 ----------
 function enterActive() {
     if (voiceMode !== 'standby') return;
     voiceMode = 'active';
@@ -1389,7 +1301,6 @@ function backToStandby() {
     setVoiceBtn('standby');
 }
 
-// ---------- 說話中即時顯示 ----------
 function showLive(raw) {
     const text = cleanSpeech(raw);
     if (!text) return;
@@ -1397,7 +1308,7 @@ function showLive(raw) {
     const hasWake = WAKE_RE.test(text);
 
     if (voiceMode === 'standby' && !hasWake) {
-        showVoiceHint('👂 ' + text);        // 沒喚醒詞，只顯示不處理
+        showVoiceHint('👂 ' + text);
         return;
     }
     const t = hasWake ? stripWake(text) : text;
@@ -1405,20 +1316,19 @@ function showLive(raw) {
     showVoiceHint('🎤 ' + (t || text));
 }
 
-// ---------- 送出一句話 ----------
 function commitSpeech(raw) {
     const text = cleanSpeech(raw);
     if (text.replace(/\s/g, '').length < 2) return;
     if (/^(嗯+|恩+|啊+|呃+|喔+|哦+|欸+)$/.test(text)) return;
     const now = Date.now();
-    if (text === lastCmd && now - lastCmdAt < 1500) return;      // 同一句短時間內不重複執行
+    if (text === lastCmd && now - lastCmdAt < 1500) return;
 
     const hasWake = WAKE_RE.test(text);
     let cmd = hasWake ? stripWake(text) : text;
 
     if (voiceMode === 'standby') {
-        if (!hasWake) return;                                      // 待機中：沒喚醒詞完全忽略
-        if (!cmd) { enterActive(); return; }                       // 只有喚醒詞：進入等指令
+        if (!hasWake) return;
+        if (!cmd) { enterActive(); return; }
     } else if (!cmd) {
         return;
     }
@@ -1429,13 +1339,12 @@ function commitSpeech(raw) {
     if (voiceMode === 'active') backToStandby();
 }
 
-// ---------- 辨識器 ----------
 function createRecognition() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return null;
 
     const r = new SR();
-    r.continuous = false;        // 一句一輪：比 continuous 穩定，重開成本很低
+    r.continuous = false;
     r.interimResults = true;
     r.lang = 'zh-TW';
     r.maxAlternatives = 1;
@@ -1444,7 +1353,6 @@ function createRecognition() {
     r._idle = null;
     r._last = '';
 
-    // 送出並馬上中止這一輪（onend 會立刻開下一輪）
     const finish = (raw) => {
         if (r._done) return;
         r._done = true;
@@ -1473,24 +1381,24 @@ function createRecognition() {
         showLive(txt);
 
         clearTimeout(r._idle);
-        if (fin) finish(txt);                                           // 瀏覽器判定說完 → 立刻送出
-        else r._idle = setTimeout(() => finish(txt), COMMIT_IDLE_MS);   // 停頓一下就直接送，不等 final
+        if (fin) finish(txt);
+        else r._idle = setTimeout(() => finish(txt), COMMIT_IDLE_MS);
     };
 
     r.onerror = (e) => {
         const code = e.error;
-        if (code === 'aborted' || code === 'no-speech') return;         // 正常情況，onend 會馬上重開
+        if (code === 'aborted' || code === 'no-speech') return;
         if (code === 'not-allowed' || code === 'service-not-allowed') {
             if (voiceUserInitiated) {
                 stopVoice();
                 alert('請允許瀏覽器使用麥克風');
             } else {
-                stopVoice(true);        // 自動啟動被擋：保留偏好，等使用者第一次點畫面再試
+                stopVoice(true);
             }
             return;
         }
         if (code === 'audio-capture') {
-            voiceErrCount++;                      // 不自動關閉，持續重試直到使用者關閉
+            voiceErrCount++;
             showVoiceHint('⚠️ 麥克風暫時無法使用，重試中…');
             return;
         }
@@ -1502,13 +1410,11 @@ function createRecognition() {
         clearTimeout(r._idle);
         setMicActive(false);
         if (voiceRecognition === r) voiceRecognition = null;
-        // 有些手機不送 final 就結束：把最後一句當成指令
         if (!r._done && r._last) {
             r._done = true;
             commitSpeech(r._last);
         }
         if (voiceMode === 'off') return;
-        // 正常情況 0 毫秒重開；連續出錯才逐步拉長間隔，避免狂響提示音
         const delay = voiceErrCount > 0 ? Math.min(250 * Math.pow(2, voiceErrCount - 1), 3000) : 0;
         scheduleRestart(delay);
     };
@@ -1534,7 +1440,6 @@ function startVoiceCycle() {
     }
 }
 
-// 看門狗：每秒檢查一次，任何卡住的情況都會自動恢復
 setInterval(() => {
     if (voiceMode === 'off') return;
     const r = voiceRecognition;
@@ -1543,14 +1448,12 @@ setInterval(() => {
         if (!voiceRestartTimer) scheduleRestart(0);
         return;
     }
-    // 已經送出但 onend 一直沒來
     if (r._done && now - (r._doneAt || now) > 1500) {
         voiceRecognition = null;
         try { r.abort(); } catch (e) {}
         scheduleRestart(0);
         return;
     }
-    // start() 之後一直沒開始聽
     if (!r._startedAt && now - r._createdAt > 6000) {
         r._done = true;
         voiceRecognition = null;
@@ -1558,7 +1461,6 @@ setInterval(() => {
         scheduleRestart(0);
         return;
     }
-    // 同一輪聽太久都沒有任何結果：換新的，保持新鮮
     if (!r._done && !r._last && r._startedAt && now - r._startedAt > 30000) {
         try { r.abort(); } catch (e) {}
     }
@@ -1576,7 +1478,6 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('online', kickVoice);
 window.addEventListener('focus', kickVoice);
 
-// ---------- 開 / 關 ----------
 function startVoice(fromUser) {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { if (fromUser) alert("此瀏覽器不支援語音辨識（建議使用 Chrome）"); return; }
@@ -1617,9 +1518,8 @@ function setWakeMode(on) {
     showVoiceHint(on ? '👂 喚醒詞模式：先說「嗨小P」再說指令' : '🗣️ 免喚醒模式：直接說地點');
 }
 
-// 點一下：開 / 關
 window.toggleContinuousVoice = function() {
-    if (voiceLongPressed) { voiceLongPressed = false; return; }     // 長按結束後的那一下 click 不處理
+    if (voiceLongPressed) { voiceLongPressed = false; return; }
     if (voiceMode === 'off') {
         startVoice(true);
         showVoiceHint(voiceWakePref ? '👂 待機中：說「嗨小P」' : '🗣️ 語音已開啟：直接說地點');
@@ -1629,7 +1529,6 @@ window.toggleContinuousVoice = function() {
     }
 };
 
-// 長按：切換 免喚醒 / 喚醒詞
 function initVoiceButton() {
     const btn = document.getElementById('voiceBtn');
     if (!btn) return;
@@ -1651,43 +1550,26 @@ function initVoiceButton() {
 }
 initVoiceButton();
 
-// 重開頁面時自動恢復
 function autoStartVoice() {
-    localStorage.removeItem('p_voice_enabled');     // 舊版設定，已不使用
+    localStorage.removeItem('p_voice_enabled');
     if (localStorage.getItem('p_voice_on') !== '1') return;
     startVoice(false);
-    // 若瀏覽器因為沒有使用者手勢而擋掉，第一次碰畫面時再啟動
     document.addEventListener('pointerdown', (e) => {
         if (e.target && e.target.closest && e.target.closest('#voiceBtn')) return;
         if (voiceMode === 'off' && localStorage.getItem('p_voice_on') === '1') startVoice(true);
     }, { once: true });
 }
 
-// ---------- 語音指令 ----------
 function navigateToTop() {
     const item = lastListData.find(p => { const s = availState(veh(p).a); return s === 'ok' || s === 'low'; }) || lastListData[0];
     if (!item) { showVoiceHint('⚠️ 目前清單沒有停車場可以導航'); return; }
-    if (!userLocation) { showVoiceHint('⚠️ 還沒有 GPS 定位'); return; }
-    showVoiceHint('🧭 導航到：' + item.name);
+    showVoiceHint('🧭 開啟 Google 導航：' + item.name);
     startNav(navArgOf(item));
 }
 
 function handleVoiceCommand(cmd) {
-    // 路線預覽中：可以用語音選路線
-    if (routePreviewing) {
-        if (/^(開始|出發|開始導航|確定)$/.test(cmd)) { confirmRoute(); return; }
-        if (/^(取消|算了)$/.test(cmd)) { cancelRoutePreview(); return; }
-        const m = cmd.match(/第?([一二三123])條?/);
-        if (m) {
-            const n = { '一': 0, '二': 1, '三': 2, '1': 0, '2': 1, '3': 2 }[m[1]];
-            if (routeState && routeState.routes && routeState.routes[n]) { selectRoute(n); return; }
-        }
-    }
-
-    // 控制類指令只在整句很短時才觸發，避免「台北車站附近」被當成控制指令
     if (cmd.length <= 10) {
         if (/關閉語音|停止語音|語音關閉/.test(cmd)) { stopVoice(); showVoiceHint('🎙️ 語音已關閉'); return; }
-        if (/結束導航|停止導航|關閉導航|取消導航/.test(cmd)) { stopNavigation(); return; }
         if (/^(開始)?導航$|^帶我去$|^出發$/.test(cmd)) { navigateToTop(); return; }
         if (/重新定位|清除搜尋|回到(我的)?位置|^定位$|^(附近|我的位置|目前位置|這裡|這邊)的?(停車場|停車位|車位)?$/.test(cmd)) {
             clearSearchAndLocate(); showVoiceHint('📍 回到目前位置'); return;
@@ -1812,16 +1694,16 @@ window.panToUserLocation = function() {
 };
 
 // ==========================================
-// 手機橫向 → 自動全螢幕（需第一次點擊觸發）
+// 手機橫向 → 自動全螢幕
 // ==========================================
 (function () {
     const root = document.documentElement;
     const reqFS = root.requestFullscreen || root.webkitRequestFullscreen;
     const exitFS = document.exitFullscreen || document.webkitExitFullscreen;
-    if (!reqFS) return; // iPhone Safari 不支援
+    if (!reqFS) return;
 
     const inFS = () => document.fullscreenElement || document.webkitFullscreenElement;
-    let triedThisLandscape = false; // 每次轉橫向只自動進入一次，避免使用者手動退出後一直被拉回去
+    let triedThisLandscape = false;
 
     function tryEnter() {
         if (triedThisLandscape || inFS() || !isLandscapePhone()) return;
@@ -1846,7 +1728,7 @@ window.panToUserLocation = function() {
                 } catch (e) {}
             }
         }
-        applyLayout(); // 全螢幕後尺寸改變，重算版型
+        applyLayout();
     }
     window.addEventListener('orientationchange', () => setTimeout(onRotate, 300));
     document.addEventListener('fullscreenchange', () => setTimeout(applyLayout, 150));

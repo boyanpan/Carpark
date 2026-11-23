@@ -1,7 +1,6 @@
 import os
 import re
 import threading
-from concurrent.futures import ThreadPoolExecutor
 import time
 import math
 import datetime
@@ -77,8 +76,6 @@ URL_AVAIL_XML = API_URL
 URL_CMS_XML = "https://tcgbusfs.blob.core.windows.net/blobtcmsv/TCMSV_allCMSavailable.xml"
 
 URL_YOUBIKE = "https://tcgbusfs.blob.core.windows.net/dotapp/youbike/v2/youbike_immediate.json"
-LIVE_BASE = "https://itaipeiparking.pma.gov.taipei/w1/GetParks"  # 路邊車格用
-STREET_TYPE = 5
 STALE_MIN = 30  # 超過幾分鐘沒更新的資料，視為「無資料」
 
 # TWD97 (EPSG:3826) -> WGS84 經緯度 (EPSG:4326)
@@ -168,28 +165,6 @@ def init_db():
             )
         """)
 
-        conn.commit()
-    finally:
-        cur.close()
-        conn.close()
-
-
-def init_street_table():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    try:
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS street_spots (
-                spot_id VARCHAR(64) PRIMARY KEY,
-                name VARCHAR(100),
-                lat DOUBLE, lng DOUBLE,
-                is_vacant TINYINT NULL,
-                remark VARCHAR(50),
-                source_update VARCHAR(30),
-                last_update TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                INDEX idx_pos (lat, lng)
-            )
-        """)
         conn.commit()
     finally:
         cur.close()
@@ -595,138 +570,6 @@ def sync_dynamic_xml_data():
         if conn and conn.is_connected():
             conn.close()
             print("資料庫連線已關閉。")
-
-
-def _grid(lat_min, lat_max, lng_min, lng_max, step):
-    pts = []
-    i = 0
-    while lat_min + i * step <= lat_max + 1e-9:
-        j = 0
-        while lng_min + j * step <= lng_max + 1e-9:
-            pts.append((round(lng_min + j * step, 5), round(lat_min + i * step, 5)))
-            j += 1
-        i += 1
-    return pts
-
-
-STREET_CENTERS = _grid(24.99, 25.15, 121.48, 121.62, 0.02)   # 約 72 點
-
-
-def _get_live(job):
-    lon, lat, t = job
-    try:
-        r = requests.get(f"{LIVE_BASE}/{lon}/{lat}/car/{t}", timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        return data if isinstance(data, list) else []
-    except Exception as e:
-        print(f"[WARN] ({lon},{lat}) type{t} 失敗: {type(e).__name__}: {str(e)[:100]}")
-        return []
-
-
-def fetch_live(centers, types_):
-    """多點查詢並用 parkId 去重"""
-    jobs = [(lo, la, t) for lo, la in centers for t in types_]
-    found = {}
-    with ThreadPoolExecutor(max_workers=4) as ex:
-        for items in ex.map(_get_live, jobs):
-            for x in items:
-                pid = x.get("parkId")
-                if pid:
-                    found[pid] = x
-    return list(found.values())
-
-
-def sync_street():
-    print("[INFO] 開始同步路邊車格...")
-    try:
-        items = [x for x in fetch_live(STREET_CENTERS, [STREET_TYPE]) if x.get("infoType") == 5]
-        if not items:
-            print("[ERROR] 抓不到任何路邊車格，保留資料庫現有內容")
-            return
-
-        def vacant(remark):
-            if remark and "空" in remark:
-                return 1
-            if remark and "停放" in remark:
-                return 0
-            return None
-
-        rows = []
-        for x in items:
-            try:
-                rows.append((x["parkId"], x.get("parkName"), float(x["lat"]), float(x["lon"]),
-                             vacant(x.get("remark")), x.get("remark"),
-                             x.get("udt") or x.get("deviceUpdateTime") or x.get("updateTime")))
-            except Exception:
-                continue
-
-        conn = get_db_connection()
-        cur = conn.cursor()
-        try:
-            for batch in _chunks(rows, 500):
-                cur.executemany("""
-                    INSERT INTO street_spots (spot_id, name, lat, lng, is_vacant, remark, source_update)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s)
-                    ON DUPLICATE KEY UPDATE
-                        name=VALUES(name), lat=VALUES(lat), lng=VALUES(lng),
-                        is_vacant=VALUES(is_vacant), remark=VALUES(remark),
-                        source_update=VALUES(source_update), last_update=CURRENT_TIMESTAMP
-                """, batch)
-            cur.execute(f"""
-                UPDATE street_spots SET is_vacant=NULL, last_update=last_update
-                WHERE last_update < NOW() - INTERVAL {STALE_MIN} MINUTE
-            """)
-            conn.commit()
-        finally:
-            cur.close()
-            conn.close()
-        print(f"[INFO] 路邊車格同步完成 ✅（{len(rows)} 筆）")
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f"[ERROR] 路邊同步失敗: {type(e).__name__}: {e}")
-
-
-_street_cache = {"t": 0, "rows": []}
-
-
-def get_cached_street_spots():
-    now = time.time()
-    if now - _street_cache["t"] < 60:
-        return _street_cache["rows"]
-    rows = db_rows("""
-        SELECT spot_id, name, lat, lng, is_vacant, remark, source_update
-        FROM street_spots
-        WHERE lat IS NOT NULL AND lng IS NOT NULL
-    """)
-    _street_cache["t"] = now
-    _street_cache["rows"] = rows
-    return rows
-
-
-@app.route("/street")
-def street():
-    """/street?lat=25.03&lng=121.50&d=0.01  → 範圍內的路邊車格（記憶體快取版）"""
-    try:
-        lat = float(request.args["lat"])
-        lng = float(request.args["lng"])
-        d = min(float(request.args.get("d", 0.01)), 0.05)
-        lat_min, lat_max = lat - d, lat + d
-        lng_min, lng_max = lng - d, lng + d
-
-        all_rows = get_cached_street_spots()
-        matched = [
-            r for r in all_rows
-            if lat_min <= r["lat"] <= lat_max and lng_min <= r["lng"] <= lng_max
-        ][:1000]
-        return jsonify({"street": matched})
-    except (KeyError, ValueError):
-        return jsonify({"error": "需要 lat、lng 參數"}), 400
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
 
 
 _RATE_PATTERNS = [
@@ -1359,6 +1202,12 @@ def serve_index():
     return app.send_static_file('index.html')
 
 
+@app.route("/street")
+def street():
+    """暫停路邊車格功能，直接回傳空陣列避免前端 404 報錯"""
+    return jsonify({"street": []})
+
+
 @app.route("/nearby")
 def nearby():
     try:
@@ -1647,10 +1496,8 @@ def handle_message(event):
 def _startup():
     try:
         init_db()
-        init_street_table()
         sync_static_desc_xml()
         sync_dynamic_xml_data()
-        sync_street()
     except Exception:
         import traceback
         traceback.print_exc()
@@ -1661,7 +1508,6 @@ threading.Thread(target=_startup, daemon=True).start()
 
 scheduler = BackgroundScheduler()
 scheduler.add_job(sync_dynamic_xml_data, 'interval', minutes=3, max_instances=1, coalesce=True)
-scheduler.add_job(sync_street, 'interval', minutes=3, max_instances=1, coalesce=True)
 scheduler.add_job(sync_static_desc_xml, 'interval', hours=6, max_instances=1, coalesce=True)
 scheduler.start()
 
