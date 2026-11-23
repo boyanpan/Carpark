@@ -225,9 +225,10 @@ syncStreetBtn();
     setTimeout(checkSavedParkedStatus, 1000);
 
     setInterval(() => {
-    fetchTaipeiParkingData();
-    fetchStreet();
-}, 180000);
+        fetchTaipeiParkingData();
+        fetchStreet();
+    }, 180000);
+}
 
 // ==========================================
 // 2. 行動端抽屜拖曳邏輯
