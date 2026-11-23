@@ -112,13 +112,13 @@ function applyLayout() {
     if (isSheetMode()) {
         if (bottomSheet) {
             bottomSheet.style.height = isSheetExpanded ? '85vh' : '35vh';
-            bottomSheet.style.transform = isNavigating ? 'translateY(100%)' : 'translateY(0)';
+            bottomSheet.style.transform = uiLocked() ? 'translateY(100%)' : 'translateY(0)';
         }
-        if (searchPanel) searchPanel.style.transform = isNavigating ? 'translateY(-100%)' : 'translateY(0)';
+        if (searchPanel) searchPanel.style.transform = uiLocked() ? 'translateY(-100%)' : 'translateY(0)';
     } else {
         if (bottomSheet) { bottomSheet.style.height = ''; bottomSheet.style.transform = ''; }
         if (searchPanel) searchPanel.style.transform = '';
-        if (isLandscapePhone() && isNavigating && sb) sb.style.transform = 'translateX(-100%)';
+        if (isLandscapePhone() && uiLocked() && sb) sb.style.transform = 'translateX(-100%)';
     }
     if (typeof google !== 'undefined' && map) google.maps.event.trigger(map, 'resize');
 }
@@ -168,14 +168,14 @@ async function initGoogleMap() {
         polylineOptions: { strokeColor: '#2563eb', strokeWeight: 7, strokeOpacity: 0.9 }
     });
 
-    map.addListener('dragstart', () => { if (isSheetMode() && !isNavigating) setUIHidden(true); });
+    // initGoogleMap() 裡的 dragstart / dragend
+    map.addListener('dragstart', () => { if (isSheetMode() && !uiLocked()) setUIHidden(true); });
     map.addListener('dragend', () => {
-        if (isSheetMode() && !isNavigating) {
-            setUIHidden(false);
-            // 彈窗開著時，搜尋面板維持收起
-            if (popupOpen && searchPanel) searchPanel.style.transform = 'translateY(-100%)';
-        }
-    });
+    if (isSheetMode() && !uiLocked()) {
+        setUIHidden(false);
+        if (popupOpen && searchPanel) searchPanel.style.transform = 'translateY(-100%)';
+    }
+});
 
     if (typeof DeviceOrientationEvent !== 'undefined' &&
         typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -694,7 +694,7 @@ function openMarkerPopup(item, marker) {
 function closePopup() {
     if (infoWindow) infoWindow.close();
     popupOpen = false;
-    if (isSheetMode() && !isNavigating && searchPanel) searchPanel.style.transform = 'translateY(0)';
+    if (isSheetMode() && !uiLocked() && searchPanel) searchPanel.style.transform = 'translateY(0)';
 }
 
 // ==========================================
@@ -854,19 +854,162 @@ function initAutocomplete() {
 }
 
 // ==========================================
-// 10. 導航功能
+// 10. 導航功能（多路線選擇）
 // ==========================================
-window.startNav = function(itemStr) {
-    const item = JSON.parse(decodeURIComponent(itemStr));
-    if (!userLocation) return alert("等待 GPS 定位中，請確保已開啟定位權限！");
-    
-    isNavigating = true; 
+let routePolys = [];
+let routeState = null;          // { item, routes }
+let selectedRoute = 0;
+let routePreviewing = false;
+function uiLocked() { return isNavigating || routePreviewing; }
+
+function clearRoutes() {
+    routePolys.forEach(p => p.setMap(null));
+    routePolys = [];
+    routeState = null;
+}
+
+function styleRoutes() {
+    routePolys.forEach((p, i) => {
+        const sel = i === selectedRoute;
+        p.setOptions({ strokeColor: sel ? '#2563eb' : '#94a3b8', strokeWeight: sel ? 8 : 6, zIndex: sel ? 10 : 1 });
+    });
+}
+
+function drawRoutes() {
+    routePolys.forEach(p => p.setMap(null));
+    routePolys = routeState.routes.map((r, i) => {
+        const poly = new google.maps.Polyline({
+            map, path: r.overview_path, strokeOpacity: 0.9, clickable: true
+        });
+        poly.addListener('click', () => { if (routePreviewing) selectRoute(i); });
+        return poly;
+    });
+    styleRoutes();
+}
+
+function legTime(leg) { return leg.duration_in_traffic || leg.duration; }
+
+function ensureRoutePicker() {
+    let el = document.getElementById('route-picker');
+    if (el) return el;
+    el = document.createElement('div');
+    el.id = 'route-picker';
+    el.className = 'hidden';
+    document.body.appendChild(el);
+    return el;
+}
+
+function renderRoutePicker() {
+    const el = ensureRoutePicker();
+    const { item, routes } = routeState;
+    const fastest = Math.min(...routes.map(r => legTime(r.legs[0]).value));
+
+    el.innerHTML = `
+        <div class="rp-head">
+            <strong>選擇路線</strong>
+            <span>前往 ${esc(item.name)}</span>
+        </div>
+        <div class="rp-list">
+            ${routes.map((r, i) => {
+                const leg = r.legs[0];
+                const t = legTime(leg);
+                const tags = [];
+                if (t.value === fastest) tags.push('<em class="rp-tag">最快</em>');
+                if (r.warnings && r.warnings.length) tags.push('<em class="rp-tag warn">注意</em>');
+                return `
+                <button type="button" class="rp-card ${i === selectedRoute ? 'sel' : ''}" onclick="selectRoute(${i})">
+                    <span class="rp-time">${esc(t.text)}</span>
+                    <span class="rp-meta">${esc(leg.distance.text)}${r.summary ? '・經 ' + esc(r.summary) : ''}</span>
+                    ${tags.join('')}
+                </button>`;
+            }).join('')}
+        </div>
+        <div class="rp-actions">
+            <button type="button" class="rp-cancel" onclick="cancelRoutePreview()">取消</button>
+            <button type="button" class="pk-go" onclick="confirmRoute()">開始導航</button>
+        </div>`;
+    el.classList.remove('hidden');
+}
+
+window.selectRoute = function(i) {
+    if (!routeState || !routeState.routes[i]) return;
+    selectedRoute = i;
+    styleRoutes();
+    if (routePreviewing) {
+        renderRoutePicker();
+        map.fitBounds(routeState.routes[i].bounds, { top: 60, bottom: 280, left: 40, right: 40 });
+    }
+};
+
+window.cancelRoutePreview = function() {
+    routePreviewing = false;
+    clearRoutes();
+    const el = document.getElementById('route-picker');
+    if (el) el.classList.add('hidden');
+    setUIHidden(false);
+};
+
+window.confirmRoute = function() {
+    if (!routeState) return;
+    beginNavigation(selectedRoute);
+};
+
+function arrowOf(html) {
+    if (html.includes('迴轉')) return '↩️';
+    if (html.includes('右')) return '➡️';
+    if (html.includes('左')) return '⬅️';
+    return '⬆️';
+}
+
+// 真正開始導航（使用者選好路線後）
+function beginNavigation(idx) {
+    const { item, routes } = routeState;
+    const route = routes ? routes[idx] : null;
+
+    isNavigating = true;
+    routePreviewing = false;
     currentDestination = item;
-    
+
+    const picker = document.getElementById('route-picker');
+    if (picker) picker.classList.add('hidden');
     const navHeader = document.getElementById('nav-header');
     if (navHeader) navHeader.classList.add('active');
     setUIHidden(true);
-    
+
+    // 只保留選定的那條
+    routePolys.forEach((p, i) => { if (i !== idx) p.setMap(null); });
+
+    const navInstruction = document.getElementById('nav-instruction');
+    const navMetrics = document.getElementById('nav-metrics');
+    const navArrow = document.getElementById('nav-arrow');
+
+    if (route) {
+        const leg = route.legs[0];
+        const step = leg.steps[0];
+        if (navArrow) navArrow.innerText = arrowOf(step.instructions);
+        const clean = step.instructions.replace(/<[^>]*>?/gm, '');
+        if (navInstruction) navInstruction.innerText = `${step.distance.text} 後，${clean}`;
+        if (navMetrics) navMetrics.innerText = `🏁 總剩餘 ${leg.distance.text} | 約 ${legTime(leg).text} 抵達`;
+        map.fitBounds(route.bounds);
+    } else {
+        if (navInstruction) navInstruction.innerText = `前往：${item.name}`;
+        if (navMetrics) navMetrics.innerText = `🚗 即時定位跟隨中`;
+    }
+
+    setTimeout(() => {
+        if (isNavigating && userLocation) {
+            map.panTo({ lat: userLocation[0], lng: userLocation[1] });
+            map.setZoom(18);
+        }
+    }, 2500);
+}
+
+window.startNav = function(itemStr) {
+    const item = JSON.parse(decodeURIComponent(itemStr));
+    if (!userLocation) return alert("等待 GPS 定位中，請確保已開啟定位權限！");
+
+    // 清掉上一次的預覽 / 路線
+    clearRoutes();
     popupOpen = false;
     if (infoWindow) infoWindow.close();
 
@@ -874,66 +1017,50 @@ window.startNav = function(itemStr) {
         origin: new google.maps.LatLng(userLocation[0], userLocation[1]),
         destination: new google.maps.LatLng(item.lat, item.lng),
         travelMode: google.maps.TravelMode.DRIVING,
+        provideRouteAlternatives: true,
+        drivingOptions: { departureTime: new Date(), trafficModel: 'bestguess' },
         region: 'TW'
     };
 
     directionsService.route(request, function(result, status) {
-        const navInstruction = document.getElementById('nav-instruction');
-        const navMetrics = document.getElementById('nav-metrics');
-        
-        if (status === google.maps.DirectionsStatus.OK) {
-            directionsRenderer.setDirections(result);
-            const route = result.routes[0].legs[0];
-            const nextStep = route.steps[0];
-            
-            let arrow = "⬆️";
-            if (nextStep.instructions.includes('右')) arrow = "➡️";
-            if (nextStep.instructions.includes('左')) arrow = "⬅️";
-            if (nextStep.instructions.includes('迴轉')) arrow = "↩️";
+        if (status === google.maps.DirectionsStatus.OK && result.routes.length) {
+            routeState = { item, routes: result.routes };
+            selectedRoute = 0;
+            drawRoutes();
 
-            const navArrow = document.getElementById('nav-arrow');
-            if (navArrow) navArrow.innerText = arrow;
-            
-            const cleanInstruction = nextStep.instructions.replace(/<[^>]*>?/gm, '');
-            if (navInstruction) navInstruction.innerText = `${nextStep.distance.text} 後，${cleanInstruction}`;
-            if (navMetrics) navMetrics.innerText = `🏁 總剩餘 ${route.distance.text} | 約 ${route.duration.text} 抵達`;
-            
-            const bounds = new google.maps.LatLngBounds();
-            bounds.extend(new google.maps.LatLng(userLocation[0], userLocation[1]));
-            bounds.extend(new google.maps.LatLng(item.lat, item.lng));
-            map.fitBounds(bounds);
-
-            setTimeout(() => {
-                if (isNavigating) {
-                    map.panTo({ lat: userLocation[0], lng: userLocation[1] });
-                    map.setZoom(18);
-                }
-            }, 2500);
+            if (result.routes.length === 1) {
+                beginNavigation(0);          // 只有一條就直接開始
+            } else {
+                routePreviewing = true;
+                setUIHidden(true);
+                renderRoutePicker();
+                map.fitBounds(result.routes[0].bounds, { top: 60, bottom: 280, left: 40, right: 40 });
+            }
         } else {
-            if (navInstruction) navInstruction.innerText = `前往：${item.name}`;
-            if (navMetrics) navMetrics.innerText = `🚗 即時定位跟隨中`;
-            map.panTo({ lat: userLocation[0], lng: userLocation[1] });
-            map.setZoom(18);
+            // 算不到路線：退回「只跟隨定位」
+            routeState = { item, routes: null };
+            beginNavigation(0);
         }
     });
-}
+};
 
 window.stopNavigation = function() {
-    isNavigating = false; 
+    isNavigating = false;
+    routePreviewing = false;
     currentDestination = null;
     const navHeader = document.getElementById('nav-header');
     if (navHeader) navHeader.classList.remove('active');
+    const picker = document.getElementById('route-picker');
+    if (picker) picker.classList.add('hidden');
+    clearRoutes();
     setUIHidden(false);
-    directionsRenderer.setDirections({routes: []});
-    
-    if (searchedLocation) {
-        map.panTo({ lat: searchedLocation[0], lng: searchedLocation[1] });
-        map.setZoom(15);
-    } else if (userLocation) {
-        map.panTo({ lat: userLocation[0], lng: userLocation[1] });
+
+    const ref = searchedLocation || userLocation;
+    if (ref) {
+        map.panTo({ lat: ref[0], lng: ref[1] });
         map.setZoom(15);
     }
-}
+};
 
 // ==========================================
 // 11. 分頁與收藏
@@ -1460,6 +1587,15 @@ function navigateToTop() {
 
 function handleVoiceCommand(cmd) {
     // 控制類指令只在整句很短時才觸發，避免「台北車站附近」被當成控制指令
+    if (routePreviewing) {
+    if (/^(開始|出發|開始導航|確定)$/.test(cmd)) { confirmRoute(); return; }
+    if (/^(取消|算了)$/.test(cmd)) { cancelRoutePreview(); return; }
+    const m = cmd.match(/第?([一二三123])條?/);
+    if (m) {
+        const n = { '一': 0, '二': 1, '三': 2, '1': 0, '2': 1, '3': 2 }[m[1]];
+        if (routeState && routeState.routes[n]) { selectRoute(n); return; }
+    }
+}
     if (cmd.length <= 10) {
         if (/關閉語音|停止語音|語音關閉/.test(cmd)) { stopVoice(); showVoiceHint('🎙️ 語音已關閉'); return; }
         if (/結束導航|停止導航|關閉導航|取消導航/.test(cmd)) { stopNavigation(); return; }
