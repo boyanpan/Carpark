@@ -1289,6 +1289,44 @@ def debug_sync():
         out["sync"] = traceback.format_exc()[-800:]
     return jsonify(out)
 
+@app.route("/debug_api")
+def debug_api():
+    base = "https://itaipeiparking.pma.gov.taipei/w1/GetParks"
+    heads = {
+        "plain": {},
+        "browser": {
+            "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://itaipeiparking.pma.gov.taipei/",
+            "Origin": "https://itaipeiparking.pma.gov.taipei",
+        },
+    }
+    tests = {
+        "known_good_t2": "121.57428299999998/25.032209999999992/car/2",
+        "short_t2":      "121.5743/25.0322/car/2",
+        "short_t5":      "121.5743/25.0322/car/5",
+        "long_t5":       "121.57428299999998/25.032209999999992/car/5",
+    }
+    out = {}
+    for hn, h in heads.items():
+        for tn, path in tests.items():
+            try:
+                r = requests.get(f"{base}/{path}", headers=h, timeout=10)
+                try:
+                    j = r.json()
+                    n = len(j) if isinstance(j, list) else "dict"
+                except Exception:
+                    n = "not json"
+                out[f"{hn}|{tn}"] = f"{r.status_code} items={n} {r.text[:80]}"
+            except Exception as e:
+                out[f"{hn}|{tn}"] = f"ERR {type(e).__name__}: {e}"
+    return jsonify(out)
+
+@app.route("/init_street")
+def init_street():
+    init_street_table()
+    return jsonify({"ok": True})
+
 
 user_states = {}
 
