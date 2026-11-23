@@ -18,6 +18,7 @@ from google.genai import types
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from pyproj import Transformer
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 
@@ -66,13 +67,18 @@ DB_CONFIG = {
     'ssl_ca': 'ca.pem',
 }
 
-LIVE_BASE = "https://itaipeiparking.pma.gov.taipei/w1/GetParks"
-API_URL = "https://tcgbusfs.blob.core.windows.net/blobtcmsv/TCMSV_allavailable.xml"
-URL_YOUBIKE = "https://tcgbusfs.blob.core.windows.net/dotapp/youbike/v2/youbike_immediate.json"
+# 新版台北市停管處 XML API
+URL_DESC_XML = "https://tcgbusfs.blob.core.windows.net/blobtcmsv/TCMSV_alldesc.xml"
+URL_AVAIL_XML = "https://tcgbusfs.blob.core.windows.net/blobtcmsv/TCMSV_allavailable.xml"
+URL_CMS_XML = "https://tcgbusfs.blob.core.windows.net/blobtcmsv/TCMSV_allCMSavailable.xml"
 
-OFF_TYPES = [1, 2, 3, 4]      # 路外停車場（infoType 1~4）
-STREET_TYPE = 5               # 路邊車格
-STALE_MIN = 30                # 超過幾分鐘沒更新的資料，視為「無資料」
+URL_YOUBIKE = "https://tcgbusfs.blob.core.windows.net/dotapp/youbike/v2/youbike_immediate.json"
+LIVE_BASE = "https://itaipeiparking.pma.gov.taipei/w1/GetParks"  # 路邊車格用
+STREET_TYPE = 5
+STALE_MIN = 30  # 超過幾分鐘沒更新的資料，視為「無資料」
+
+# TWD97 (EPSG:3826) -> WGS84 經緯度 (EPSG:4326)
+TRANSFORMER = Transformer.from_crs("EPSG:3826", "EPSG:4326", always_xy=True)
 
 NEW_COLUMNS = {
     "total_motor": "INT",
@@ -104,7 +110,7 @@ def db_rows(sql, params=()):
 
 
 def init_db():
-    """初始化 parking_lots 與 parking_status 資料表，並補齊缺少的新欄位"""
+    """初始化 parking_lots 資料表並補齊缺少的新欄位"""
     conn = get_db_connection()
     cur = conn.cursor()
     try:
@@ -144,19 +150,6 @@ def init_db():
             if col not in existing_cols:
                 cur.execute(f"ALTER TABLE parking_lots ADD COLUMN {col} {col_type}")
 
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS parking_status (
-                park_id VARCHAR(64) PRIMARY KEY,
-                totalcar INT DEFAULT 0,
-                totalmotor INT DEFAULT 0,
-                totalbike INT DEFAULT 0,
-                totalbus INT DEFAULT 0,
-                Pregnancy_First INT DEFAULT 0,
-                Handicap_First INT DEFAULT 0,
-                totallargemotor INT DEFAULT 0,
-                ChargingStation INT DEFAULT 0
-            )
-        """)
         conn.commit()
     finally:
         cur.close()
@@ -186,9 +179,13 @@ def init_street_table():
 
 
 def clean(v):
-    """NaN / None 一律轉成 None（MySQL 寫入 NaN 會報錯）"""
+    """NaN / None / 空字串一律轉成 None（MySQL 寫入 NaN 會報錯）"""
     try:
-        return None if v is None or pd.isna(v) else v
+        if v is None or pd.isna(v):
+            return None
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
     except (TypeError, ValueError):
         return v
 
@@ -222,7 +219,7 @@ def spot_avail(v):
     if v is None:
         return None
     try:
-        n = int(v)
+        n = int(float(str(v).strip()))
     except (TypeError, ValueError):
         return None
     return n if n >= 0 else None
@@ -234,22 +231,274 @@ def spot_total(v):
     return n if n and n > 0 else None
 
 
-def safe_int(val):
-    """數字防禦機制：負數 (如 -9 代表無資料) 或非數字一律轉為 0"""
-    if val is None:
-        return 0
-    val_str = str(val).strip()
-    if val_str.lstrip('-').isdigit():
-        num = int(val_str)
-        return num if num >= 0 else 0
-    return 0
-
-
 def clean_tag(tag):
     """移除 XML 命名空間並統一轉為小寫"""
     if '}' in tag:
         tag = tag.split('}', 1)[1]
     return tag.lower()
+
+
+_EV_IDLE = ('空閒', '待機', '可使用', '可用', 'available', 'idle', 'standby')
+_EV_BUSY = ('充電', '使用', '佔用', '占用', '故障', '離線', '預約', 'charging', 'busy', 'occupied', 'fault', 'offline')
+
+
+def parse_ev_xml(park_elem, fields):
+    """解析 XML 中的充電樁可用數：支援巢狀 scoketStatusList/spot_status，也支援純數字欄位"""
+    statuses = []
+    for sub in park_elem.iter():
+        if clean_tag(sub.tag) == 'spot_status' and sub.text:
+            statuses.append(sub.text.strip().lower())
+
+    if statuses:
+        idle = busy = 0
+        for st in statuses:
+            if any(k in st for k in _EV_IDLE):
+                idle += 1
+            elif any(k in st for k in _EV_BUSY):
+                busy += 1
+        if idle + busy == len(statuses):
+            return idle
+        return None
+
+    return spot_avail(
+        fields.get('availableev')
+        or fields.get('chargingstation')
+        or fields.get('chargestation')
+    )
+
+
+def _fetch_xml(url: str, timeout: int = 15):
+    """抓取並解析 XML，回傳 (root, updatetime_str)"""
+    r = requests.get(url, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
+    r.raise_for_status()
+    content = r.content.lstrip(b'\xef\xbb\xbf')
+    root = ET.fromstring(content)
+
+    updatetime = None
+    for child in root:
+        if clean_tag(child.tag) == 'updatetime' and child.text:
+            updatetime = child.text.strip()[:30]
+            break
+    return root, updatetime
+
+
+def _chunks(seq, size=500):
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
+
+
+def sync_static_desc_xml():
+    """靜態資料：TCMSV_alldesc.xml → parking_lots（名稱、地址、座標、費率、總格數）"""
+    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [INFO] 開始同步靜態停車場資訊 (TCMSV_alldesc.xml)...")
+    try:
+        root, _ = _fetch_xml(URL_DESC_XML, timeout=25)
+        park_list = [elem for elem in root.iter() if clean_tag(elem.tag) == 'park']
+        if not park_list:
+            print("[ERROR] TCMSV_alldesc.xml 內找不到任何 park 節點，保留現有資料")
+            return
+
+        values, skipped = [], 0
+        for park in park_list:
+            try:
+                fields = {
+                    clean_tag(child.tag): (child.text.strip() if child.text else None)
+                    for child in park
+                }
+                p_id = fields.get('id')
+                tx = fields.get('tw97x')
+                ty = fields.get('tw97y')
+                if not p_id or not tx or not ty:
+                    skipped += 1
+                    continue
+
+                lng, lat = TRANSFORMER.transform(float(tx), float(ty))
+                if not (24.5 <= lat <= 25.6 and 121.0 <= lng <= 122.2):
+                    skipped += 1
+                    continue
+
+                name = str(fields.get('name') or '')
+                address = clean(fields.get('address')) or clean(fields.get('area'))
+                values.append((
+                    p_id,
+                    name,
+                    categorize_parking(name),
+                    address,
+                    lat,
+                    lng,
+                    spot_total(fields.get('totalcar')),
+                    clean(fields.get('payex')),
+                    extract_structure_type({"name": name, "address": address or ""}),
+                    spot_total(fields.get('totalmotor')),
+                    spot_total(fields.get('handicap_first')),
+                    spot_total(fields.get('pregnancy_first')),
+                    spot_total(fields.get('chargingstation') or fields.get('chargestation')),
+                ))
+            except Exception as e:
+                skipped += 1
+                if skipped <= 3:
+                    print(f"[WARN] 略過靜態資料一筆: {type(e).__name__}: {e}")
+
+        if not values:
+            print("[ERROR] 沒有可寫入的靜態資料")
+            return
+
+        sql = """
+            INSERT INTO parking_lots
+                (id, name, category, address, lat, lng, total_car, payex, structure_type,
+                 total_motor, total_handicap, total_pregnancy, total_ev)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON DUPLICATE KEY UPDATE
+                name = VALUES(name),
+                category = VALUES(category),
+                address = VALUES(address),
+                lat = VALUES(lat),
+                lng = VALUES(lng),
+                total_car = VALUES(total_car),
+                payex = VALUES(payex),
+                structure_type = VALUES(structure_type),
+                total_motor = VALUES(total_motor),
+                total_handicap = VALUES(total_handicap),
+                total_pregnancy = VALUES(total_pregnancy),
+                total_ev = VALUES(total_ev),
+                last_update = last_update
+        """
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            for batch in _chunks(values, 500):
+                cur.executemany(sql, batch)
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+
+        print(f"[INFO] 靜態停車場同步完成 ✅（{len(values)} 筆，略過 {skipped} 筆）")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"[ERROR] 靜態資料同步失敗: {type(e).__name__}: {e}")
+
+
+def sync_dynamic_xml_data():
+    """即時空位：TCMSV_allavailable.xml + TCMSV_allCMSavailable.xml → parking_lots（每 3 分鐘）"""
+    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [INFO] 開始同步即時剩餘車位 (XML)...")
+    try:
+        # 1. 主要即時空位 (TCMSV_allavailable.xml)
+        root_avail, udt_avail = _fetch_xml(URL_AVAIL_XML, timeout=15)
+        avail_nodes = [elem for elem in root_avail.iter() if clean_tag(elem.tag) == 'park']
+
+        avail_map = {}
+        for park in avail_nodes:
+            fields = {
+                clean_tag(child.tag): (child.text.strip() if child.text else None)
+                for child in park
+            }
+            p_id = fields.get('id')
+            if not p_id:
+                continue
+
+            avail_map[p_id] = {
+                "car": spot_avail(fields.get('availablecar')),
+                "motor": spot_avail(fields.get('availablemotor')),
+                "handicap": spot_avail(fields.get('availablehandicap') or fields.get('handicap_first')),
+                "pregnancy": spot_avail(fields.get('availablepregnancy') or fields.get('pregnancy_first')),
+                "ev": parse_ev_xml(park, fields),
+                "udt": udt_avail,
+            }
+
+        # 2. CMS 即時空位補齊 (TCMSV_allCMSavailable.xml)
+        cms_added = 0
+        try:
+            root_cms, udt_cms = _fetch_xml(URL_CMS_XML, timeout=15)
+            cms_nodes = [
+                elem for elem in root_cms.iter()
+                if clean_tag(elem.tag) in ('park', 'cms')
+            ]
+            for node in cms_nodes:
+                fields = {
+                    clean_tag(child.tag): (child.text.strip() if child.text else None)
+                    for child in node
+                }
+                p_id = fields.get('id') or fields.get('parkid')
+                cms_car = spot_avail(fields.get('availablecar') or fields.get('available'))
+                if not p_id or cms_car is None:
+                    continue
+
+                if p_id not in avail_map:
+                    avail_map[p_id] = {
+                        "car": cms_car,
+                        "motor": spot_avail(fields.get('availablemotor')),
+                        "handicap": spot_avail(fields.get('availablehandicap') or fields.get('handicap_first')),
+                        "pregnancy": spot_avail(fields.get('availablepregnancy') or fields.get('pregnancy_first')),
+                        "ev": parse_ev_xml(node, fields),
+                        "udt": udt_cms or udt_avail,
+                    }
+                    cms_added += 1
+                elif avail_map[p_id]["car"] is None:
+                    avail_map[p_id]["car"] = cms_car
+                    cms_added += 1
+        except Exception as e:
+            print(f"[WARN] CMS XML 讀取失敗（不影響主即時資料）: {type(e).__name__}: {e}")
+
+        if not avail_map:
+            print("[ERROR] XML 內抓不到任何即時車位資料，保留資料庫現有內容")
+            return
+
+        rows = [
+            (pid, d["car"], d["motor"], d["handicap"], d["pregnancy"], d["ev"], d["udt"])
+            for pid, d in avail_map.items()
+        ]
+
+        # 3. 透過暫存表批次更新 parking_lots，速度最快且不會產生缺少座標的孤立列
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                CREATE TEMPORARY TABLE tmp_avail (
+                    id VARCHAR(64) PRIMARY KEY,
+                    available_car INT,
+                    available_motor INT,
+                    available_handicap INT,
+                    available_pregnancy INT,
+                    available_ev INT,
+                    source_update VARCHAR(30)
+                )
+            """)
+            for batch in _chunks(rows, 500):
+                cur.executemany(
+                    "INSERT INTO tmp_avail VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                    batch
+                )
+            cur.execute("""
+                UPDATE parking_lots p
+                JOIN tmp_avail t ON p.id = t.id
+                SET p.available_car = t.available_car,
+                    p.available_motor = t.available_motor,
+                    p.available_handicap = t.available_handicap,
+                    p.available_pregnancy = t.available_pregnancy,
+                    p.available_ev = t.available_ev,
+                    p.source_update = t.source_update,
+                    p.last_update = CURRENT_TIMESTAMP
+            """)
+            updated = cur.rowcount
+
+            # 超過 STALE_MIN 分鐘沒被更新到的舊列 → 車位數清空，不顯示過期數字
+            cur.execute(f"""
+                UPDATE parking_lots SET
+                    available_car=NULL, available_motor=NULL, available_handicap=NULL,
+                    available_pregnancy=NULL, available_ev=NULL, last_update=last_update
+                WHERE last_update < NOW() - INTERVAL {STALE_MIN} MINUTE
+            """)
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+
+        print(f"[INFO] 即時車位同步完成 ✅（來源 {len(rows)} 筆、CMS 補齊 {cms_added} 筆、實際更新 {updated} 筆）")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"[ERROR] 即時車位同步失敗: {type(e).__name__}: {e}")
 
 
 def _grid(lat_min, lat_max, lng_min, lng_max, step):
@@ -264,7 +513,6 @@ def _grid(lat_min, lat_max, lng_min, lng_max, step):
     return pts
 
 
-OFF_CENTERS = _grid(24.99, 25.15, 121.48, 121.62, 0.04)      # 約 20 點
 STREET_CENTERS = _grid(24.99, 25.15, 121.48, 121.62, 0.02)   # 約 72 點
 
 
@@ -291,75 +539,6 @@ def fetch_live(centers, types_):
                 if pid:
                     found[pid] = x
     return list(found.values())
-
-
-def sync_data_to_db():
-    """路外停車場：官方即時來源 → parking_lots"""
-    print("[INFO] 開始同步路外停車場（官方即時來源）...")
-    try:
-        items = [x for x in fetch_live(OFF_CENTERS, OFF_TYPES) if x.get("infoType") != 5]
-        if not items:
-            print("[ERROR] 抓不到任何路外資料，保留資料庫現有內容")
-            return
-
-        values, skipped = [], 0
-        for x in items:
-            try:
-                name = str(x.get("parkName") or "")
-                values.append((
-                    x["parkId"], name, categorize_parking(name), clean(x.get("address")),
-                    float(x["lat"]), float(x["lon"]),
-                    spot_avail(x.get("carRemainderNum")), spot_total(x.get("carTotalNum")),
-                    clean(x.get("payex")),
-                    extract_structure_type({"name": name, "address": x.get("address")}),
-                    spot_total(x.get("motorTotalNum")), spot_avail(x.get("motorRemainderNum")),
-                    spot_total(x.get("handicap_First")), spot_avail(x.get("handicap_FirstRemainderNum")),
-                    spot_total(x.get("pregnancy_First")), spot_avail(x.get("pregnancy_FirstRemainderNum")),
-                    spot_total(x.get("chargeStationTotalNum")), spot_avail(x.get("chargeStation")),
-                    x.get("updateTime") or x.get("udt"),
-                ))
-            except Exception as e:
-                skipped += 1
-                if skipped <= 3:
-                    print(f"[WARN] 略過一筆: {type(e).__name__}: {e}")
-
-        sql = """
-            INSERT INTO parking_lots
-                (id, name, category, address, lat, lng, available_car, total_car, payex, structure_type,
-                 total_motor, available_motor, total_handicap, available_handicap,
-                 total_pregnancy, available_pregnancy, total_ev, available_ev, source_update)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            ON DUPLICATE KEY UPDATE
-                name = VALUES(name), category = VALUES(category), address = VALUES(address),
-                lat = VALUES(lat), lng = VALUES(lng),
-                available_car = VALUES(available_car), total_car = VALUES(total_car),
-                payex = VALUES(payex), structure_type = VALUES(structure_type),
-                total_motor = VALUES(total_motor), available_motor = VALUES(available_motor),
-                total_handicap = VALUES(total_handicap), available_handicap = VALUES(available_handicap),
-                total_pregnancy = VALUES(total_pregnancy), available_pregnancy = VALUES(available_pregnancy),
-                total_ev = VALUES(total_ev), available_ev = VALUES(available_ev),
-                source_update = VALUES(source_update),
-                last_update = CURRENT_TIMESTAMP
-        """
-        conn = get_db_connection()
-        cur = conn.cursor()
-        try:
-            cur.executemany(sql, values)
-            cur.execute(f"""
-                UPDATE parking_lots SET
-                    available_car=NULL, available_motor=NULL, available_handicap=NULL,
-                    available_pregnancy=NULL, available_ev=NULL, last_update=last_update
-                WHERE last_update < NOW() - INTERVAL {STALE_MIN} MINUTE
-            """)
-            conn.commit()
-        finally:
-            cur.close()
-            conn.close()
-        print(f"[INFO] 路外同步完成 ✅（{len(values)} 筆，略過 {skipped} 筆）")
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f"[ERROR] 路外同步失敗: {type(e).__name__}: {e}")
 
 
 def sync_street():
@@ -389,14 +568,15 @@ def sync_street():
         conn = get_db_connection()
         cur = conn.cursor()
         try:
-            cur.executemany("""
-                INSERT INTO street_spots (spot_id, name, lat, lng, is_vacant, remark, source_update)
-                VALUES (%s,%s,%s,%s,%s,%s,%s)
-                ON DUPLICATE KEY UPDATE
-                    name=VALUES(name), lat=VALUES(lat), lng=VALUES(lng),
-                    is_vacant=VALUES(is_vacant), remark=VALUES(remark),
-                    source_update=VALUES(source_update), last_update=CURRENT_TIMESTAMP
-            """, rows)
+            for batch in _chunks(rows, 500):
+                cur.executemany("""
+                    INSERT INTO street_spots (spot_id, name, lat, lng, is_vacant, remark, source_update)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s)
+                    ON DUPLICATE KEY UPDATE
+                        name=VALUES(name), lat=VALUES(lat), lng=VALUES(lng),
+                        is_vacant=VALUES(is_vacant), remark=VALUES(remark),
+                        source_update=VALUES(source_update), last_update=CURRENT_TIMESTAMP
+                """, batch)
             cur.execute(f"""
                 UPDATE street_spots SET is_vacant=NULL, last_update=last_update
                 WHERE last_update < NOW() - INTERVAL {STALE_MIN} MINUTE
@@ -410,95 +590,6 @@ def sync_street():
         import traceback
         traceback.print_exc()
         print(f"[ERROR] 路邊同步失敗: {type(e).__name__}: {e}")
-
-
-def sync_dynamic_xml_data():
-    """台北市停車場即時剩餘車位數 (XML) → parking_status"""
-    conn = None
-    cursor = None
-    try:
-        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 正在連線至 Aiven 資料庫...")
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        print("正在爬取台北市停車場即時剩餘車位數 (XML)...")
-        response = requests.get(API_URL, timeout=10)
-        response.raise_for_status()
-        response.encoding = 'utf-8'
-
-        root = ET.fromstring(response.content)
-
-        # 忽略大小寫與命名空間，找出所有 park 節點
-        park_list = [elem for elem in root.iter() if clean_tag(elem.tag) == 'park']
-
-        if not park_list:
-            print("XML 內找不到任何 <park> 資料，API 實際前 500 字元內容如下：")
-            print(response.text[:500])
-            return
-
-        print(f"成功取得 {len(park_list)} 筆即時資料，準備更新 'parking_status' 資料表...")
-
-        sql = """
-        INSERT INTO parking_status (
-            park_id, totalcar, totalmotor, totalbike, totalbus,
-            Pregnancy_First, Handicap_First, totallargemotor, ChargingStation
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON DUPLICATE KEY UPDATE
-            totalcar = VALUES(totalcar),
-            totalmotor = VALUES(totalmotor),
-            totalbike = VALUES(totalbike),
-            totalbus = VALUES(totalbus),
-            Pregnancy_First = VALUES(Pregnancy_First),
-            Handicap_First = VALUES(Handicap_First),
-            totallargemotor = VALUES(totallargemotor),
-            ChargingStation = VALUES(ChargingStation);
-        """
-
-        insert_data = []
-        for park in park_list:
-            fields = {
-                clean_tag(child.tag): (child.text.strip() if child.text else None)
-                for child in park
-            }
-
-            p_id = fields.get('id')
-            if not p_id:
-                continue
-
-            car = safe_int(fields.get('availablecar'))
-            motor = safe_int(fields.get('availablemotor'))
-            bike = safe_int(fields.get('availablebike'))
-            bus = safe_int(fields.get('availablebus'))
-            preg = safe_int(fields.get('pregnancy_first'))
-            handicap = safe_int(fields.get('handicap_first'))
-            large_motor = safe_int(fields.get('availablelargemotor'))
-            charge = safe_int(fields.get('chargingstation') or fields.get('chargestation'))
-
-            insert_data.append((
-                p_id, car, motor, bike, bus,
-                preg, handicap, large_motor, charge
-            ))
-
-        if insert_data:
-            cursor.executemany(sql, insert_data)
-            conn.commit()
-            print(f"🎉 成功更新 {cursor.rowcount} 筆停車場即時剩餘車位資料！")
-        else:
-            print("沒有解析到任何有效的資料。")
-
-    except ET.ParseError as err:
-        print(f"XML 解析錯誤: {err}")
-    except mysql.connector.Error as err:
-        print(f"資料庫錯誤: {err}")
-    except Exception as e:
-        print(f"發生錯誤: {e}")
-    finally:
-        if cursor:
-            cursor.close()
-        if conn and conn.is_connected():
-            conn.close()
-            print("資料庫連線已關閉。")
 
 
 @app.route("/street")
@@ -1323,44 +1414,37 @@ def callback():
 
 @app.route("/debug_sync")
 def debug_sync():
+    """檢查三支 XML API 與資料庫狀態；加上 ?full=1 會強制重抓靜態資料"""
     out = {}
-    # 1. Render 打得到官方 API 嗎？
-    try:
-        r = requests.get(
-            "https://itaipeiparking.pma.gov.taipei/w1/GetParks/121.5654/25.0330/car/5",
-            timeout=10, headers={"User-Agent": "Mozilla/5.0"})
-        out["api_status"] = r.status_code
-        out["api_head"] = r.text[:200]
+    for label, url in [("desc", URL_DESC_XML), ("avail", URL_AVAIL_XML), ("cms", URL_CMS_XML)]:
         try:
-            out["api_count"] = len(r.json())
-        except Exception:
-            out["api_count"] = "不是 JSON"
-    except Exception as e:
-        out["api_error"] = f"{type(e).__name__}: {e}"
+            root, udt = _fetch_xml(url, timeout=15)
+            nodes = [e for e in root.iter() if clean_tag(e.tag) in ('park', 'cms')]
+            out[f"xml_{label}"] = {"nodes": len(nodes), "updatetime": udt}
+        except Exception as e:
+            out[f"xml_{label}_error"] = f"{type(e).__name__}: {e}"
 
-    # 2. 資料庫連得上嗎？各資料表狀態
     try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT COUNT(*), MAX(last_update) FROM street_spots")
-        out["street_rows"] = str(cur.fetchone())
-        cur.execute("SELECT COUNT(*), MAX(last_update) FROM parking_lots")
-        out["lots_rows"] = str(cur.fetchone())
-        cur.execute("SELECT COUNT(*) FROM parking_status")
-        out["status_rows"] = str(cur.fetchone())
-        cur.close()
-        conn.close()
-    except Exception as e:
-        out["db_error"] = f"{type(e).__name__}: {e}"
-
-    # 3. 實際跑一次同步
-    try:
-        sync_data_to_db()
+        if request.args.get("full") == "1":
+            sync_static_desc_xml()
         sync_dynamic_xml_data()
         out["sync"] = "ok"
     except Exception:
         import traceback
         out["sync"] = traceback.format_exc()[-800:]
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*), SUM(available_car IS NOT NULL), MAX(last_update), MAX(source_update) FROM parking_lots")
+        out["parking_lots"] = str(cur.fetchone())
+        cur.execute("SELECT COUNT(*), MAX(last_update) FROM street_spots")
+        out["street_spots"] = str(cur.fetchone())
+        cur.close()
+        conn.close()
+    except Exception as e:
+        out["db_error"] = f"{type(e).__name__}: {e}"
+
     return jsonify(out)
 
 
@@ -1450,9 +1534,9 @@ def _startup():
     try:
         init_db()
         init_street_table()
-        sync_data_to_db()
-        sync_street()
+        sync_static_desc_xml()
         sync_dynamic_xml_data()
+        sync_street()
     except Exception:
         import traceback
         traceback.print_exc()
@@ -1462,9 +1546,9 @@ def _startup():
 threading.Thread(target=_startup, daemon=True).start()
 
 scheduler = BackgroundScheduler()
-scheduler.add_job(sync_data_to_db, 'interval', minutes=3, max_instances=1, coalesce=True)
-scheduler.add_job(sync_street, 'interval', minutes=3, max_instances=1, coalesce=True)
 scheduler.add_job(sync_dynamic_xml_data, 'interval', minutes=3, max_instances=1, coalesce=True)
+scheduler.add_job(sync_street, 'interval', minutes=3, max_instances=1, coalesce=True)
+scheduler.add_job(sync_static_desc_xml, 'interval', hours=6, max_instances=1, coalesce=True)
 scheduler.start()
 
 if __name__ == "__main__":
